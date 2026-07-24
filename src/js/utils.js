@@ -36,10 +36,12 @@ function getFileType(key) {
   return 'file'
 }
 
-/** @typedef {'http401Error' | 'http403Error' | 'http404Error' | 'corsError' | 'networkError'} ErrorMessageKey */
+/** @typedef {'http401Error' | 'http403Error' | 'http404Error' | 'networkError'} ErrorMessageKey */
 
 /**
- * Get user-friendly error message based on error type
+ * Get user-friendly error message based on error type.
+ * 浏览器中的 `Failed to fetch` 既可能是 CORS，也可能是 DNS、TLS、代理或网络中断，
+ * 因此这里不再直接断言为 CORS；具体排查由 Bucket 连接检查界面负责。
  * @param {Error} err - Error object
  * @returns {ErrorMessageKey} - i18n key for the error message
  */
@@ -48,9 +50,6 @@ function getErrorMessage(err) {
   if (msg === 'HTTP_401') return 'http401Error'
   if (msg === 'HTTP_403') return 'http403Error'
   if (msg === 'HTTP_404') return 'http404Error'
-  if (err instanceof TypeError && msg.includes('Failed to fetch')) {
-    return 'corsError'
-  }
   return 'networkError'
 }
 
@@ -93,16 +92,6 @@ function getBaseName(name) {
 function getMimeType(key) {
   const ext = getExtension(key).toLowerCase()
   /** @type {Record<string, string>} */
-  //   export const IMAGE_RE = /\.(jpg|jpeg|png|gif|webp|svg|ico|bmp|avif)$/i
-  // export const COMPRESSIBLE_IMAGE_RE = /\.(jpe?g|png|webp|avif)$/i
-  // export const TEXT_RE =
-  //   /\.(txt|md|json|xml|csv|html|css|js|ts|jsx|tsx|yaml|yml|toml|ini|cfg|conf|log|sh|bash|py|rb|go|rs|java|c|cpp|h|hpp|sql|env|gitignore|dockerfile)$/i
-  // export const AUDIO_RE = /\.(mp3|wav|ogg|flac|aac|m4a|wma)$/i
-  // export const VIDEO_RE = /\.(mp4|webm|ogg|mov|avi|mkv|m4v)$/i
-  // export const DOCUMENT_RE = /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp|rtf)$/i
-  // export const ARCHIVE_RE = /\.(zip|rar|7z|tar|gz|bz2|xz|tgz)$/i
-  // export const CODE_RE = /\.(js|ts|jsx|tsx|py|rb|go|rs|java|c|cpp|h|hpp|sh|bash)$/i
-
   const map = {
     jpg: 'image/jpeg',
     jpeg: 'image/jpeg',
