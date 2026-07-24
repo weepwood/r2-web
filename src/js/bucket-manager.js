@@ -2,6 +2,9 @@ import { ConfigManager } from './config-manager.js'
 import { R2Client } from './r2-client.js'
 import { getCurrentLang } from './i18n.js'
 
+/** @param {ParentNode} root @param {string} selector */
+const q = (root, selector) => /** @type {HTMLElement} */ (root.querySelector(selector))
+
 const messages = {
   zh: {
     manage: '管理 Bucket', add: '添加 Bucket', sync: '同步账户 Bucket', name: 'Bucket 名称', alias: '显示名称（可选）',
@@ -116,7 +119,7 @@ class BucketManagerUI {
       <div class="bucket-manager-panel">
         <header class="bucket-manager-header">
           <div><h2></h2><p></p></div>
-          <button type="button" class="bucket-dialog-close">×</button>
+          <button type="button" class="bucket-dialog-close" aria-label="${this.#m('close')}">×</button>
         </header>
         <div class="bucket-manager-actions">
           <button type="button" class="btn secondary bucket-sync-btn"></button>
@@ -133,22 +136,26 @@ class BucketManagerUI {
         <div class="bucket-manager-status" role="status"></div>
         <div class="bucket-list"></div>
       </div>`
-    dialog.querySelector('h2').textContent = this.#m('manage')
-    dialog.querySelector('header p').textContent = this.#m('tip')
-    dialog.querySelector('.bucket-dialog-close').setAttribute('aria-label', this.#m('close'))
-    dialog.querySelector('.bucket-sync-btn').textContent = this.#m('sync')
-    dialog.querySelector('input[name="name"]').placeholder = this.#m('name')
-    dialog.querySelector('input[name="alias"]').placeholder = this.#m('alias')
-    dialog.querySelector('input[name="customDomain"]').placeholder = this.#m('domain')
-    dialog.querySelector('option[value="public"]').textContent = this.#m('public')
-    dialog.querySelector('option[value="private"]').textContent = this.#m('private')
-    dialog.querySelector('.bucket-add-form button').textContent = this.#m('add')
+    q(dialog, 'h2').textContent = this.#m('manage')
+    q(dialog, 'header p').textContent = this.#m('tip')
+    q(dialog, '.bucket-sync-btn').textContent = this.#m('sync')
+    q(dialog, 'input[name="name"]').setAttribute('placeholder', this.#m('name'))
+    q(dialog, 'input[name="alias"]').setAttribute('placeholder', this.#m('alias'))
+    q(dialog, 'input[name="customDomain"]').setAttribute('placeholder', this.#m('domain'))
+    q(dialog, 'option[value="public"]').textContent = this.#m('public')
+    q(dialog, 'option[value="private"]').textContent = this.#m('private')
+    q(dialog, '.bucket-add-form button').textContent = this.#m('add')
 
-    dialog.querySelector('.bucket-dialog-close').addEventListener('click', () => dialog.close())
-    dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close() })
-    dialog.querySelector('.bucket-add-form').addEventListener('submit', (event) => this.#addBucket(event))
-    dialog.querySelector('.bucket-sync-btn').addEventListener('click', (event) => this.#syncBuckets(event))
-    dialog.addEventListener('close', () => { dialog.remove(); if (this.#dialog === dialog) this.#dialog = null })
+    q(dialog, '.bucket-dialog-close').addEventListener('click', () => dialog.close())
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) dialog.close()
+    })
+    q(dialog, '.bucket-add-form').addEventListener('submit', (event) => this.#addBucket(event))
+    q(dialog, '.bucket-sync-btn').addEventListener('click', (event) => this.#syncBuckets(event))
+    dialog.addEventListener('close', () => {
+      dialog.remove()
+      if (this.#dialog === dialog) this.#dialog = null
+    })
 
     document.body.append(dialog)
     this.#dialog = dialog
@@ -180,7 +187,11 @@ class BucketManagerUI {
       const title = document.createElement('strong')
       title.textContent = bucket.alias || bucket.name
       const detail = document.createElement('span')
-      detail.textContent = bucket.alias ? bucket.name : bucket.bucketAccess === 'private' ? this.#m('private') : this.#m('public')
+      detail.textContent = bucket.alias
+        ? bucket.name
+        : bucket.bucketAccess === 'private'
+          ? this.#m('private')
+          : this.#m('public')
       heading.append(title, detail)
       if (bucket.id === active?.id) {
         const badge = document.createElement('em')
@@ -241,9 +252,9 @@ class BucketManagerUI {
 
   #status(message, isError = false) {
     if (!this.#dialog) return
-    const status = this.#dialog.querySelector('.bucket-manager-status')
+    const status = q(this.#dialog, '.bucket-manager-status')
     status.textContent = message
-    status.dataset.error = String(isError)
+    status.setAttribute('data-error', String(isError))
   }
 
   #errorMessage(error) {
