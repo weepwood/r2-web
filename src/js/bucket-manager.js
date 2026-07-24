@@ -11,6 +11,7 @@ function must(root, selector) {
 
 const messages = {
   zh: {
+    manage: 'Bucket 管理',
     current: '当前 Bucket',
     add: '添加 Bucket',
     addTitle: '添加新的 Bucket',
@@ -50,6 +51,7 @@ const messages = {
     corsHint: 'Origin 不要包含路径或结尾斜杠。修改 CORS 后可能需要清除旧的预检缓存。',
   },
   zh_TW: {
+    manage: 'Bucket 管理',
     current: '目前 Bucket',
     add: '新增 Bucket',
     addTitle: '新增 Bucket',
@@ -89,6 +91,7 @@ const messages = {
     corsHint: 'Origin 不要包含路徑或結尾斜線。修改 CORS 後可能需要清除舊的預檢快取。',
   },
   en: {
+    manage: 'Bucket management',
     current: 'Current bucket',
     add: 'Add bucket',
     addTitle: 'Add a bucket',
@@ -128,6 +131,7 @@ const messages = {
     corsHint: 'Do not include a path or trailing slash in Origin. Clear cached preflight responses after changing CORS.',
   },
   ja: {
+    manage: 'Bucket 管理',
     current: '現在の Bucket',
     add: 'Bucket を追加',
     addTitle: 'Bucket を追加',
@@ -254,7 +258,7 @@ class BucketManagerUI {
         <div class="bucket-control-row">
           <select id="bucket-settings-select"></select>
           <button type="button" class="btn secondary sm bucket-test-btn"></button>
-          <button type="button" class="btn secondary sm bucket-remove-btn"></button>
+          <button type="button" class="btn danger sm bucket-remove-btn"></button>
         </div>
       </div>
       <div class="bucket-add-panel" hidden>
@@ -364,7 +368,7 @@ class BucketManagerUI {
     const active = this.#config.getActiveBucket()
     const buckets = profile?.buckets || []
 
-    must(manager, '.bucket-settings-heading h3').textContent = this.#m('current')
+    must(manager, '.bucket-settings-heading h3').textContent = this.#m('manage')
     must(manager, '.bucket-settings-intro').textContent = this.#m('intro')
     must(manager, '.bucket-add-toggle').textContent = this.#m('add')
     must(manager, '.bucket-current-field label').textContent = this.#m('current')
@@ -398,7 +402,7 @@ class BucketManagerUI {
     const aliasLabel = document.querySelector('#bucket-alias-field label')
     const aliasHint = document.querySelector('#bucket-alias-field .field-hint')
     const aliasInput = /** @type {HTMLInputElement | null} */ (document.querySelector('#cfg-bucket-alias'))
-    if (aliasLabel) aliasLabel.textContent = `${this.#m('alias')}（${this.#m('optional')}）`
+    if (aliasLabel) aliasLabel.textContent = `${this.#m('alias')} · ${this.#m('optional')}`
     if (aliasHint) aliasHint.textContent = this.#m('aliasHint')
     if (aliasInput) aliasInput.value = active?.alias || ''
 
