@@ -83,20 +83,21 @@ test('设置表单只更新当前 Bucket', () => {
   assert.equal(manager.get().customDomain, 'https://archive.example.com')
 })
 
-test('自动发现只合并尚未配置的 Bucket', () => {
+test('手动添加时校验 R2 Bucket 名称', () => {
   const manager = new ConfigManager()
   manager.save({ accountId: 'account', accessKeyId: 'key', secretAccessKey: 'secret', bucket: 'images' })
 
-  const added = manager.mergeDiscoveredBuckets([{ name: 'images' }, { name: 'backup' }, { name: 'archive' }])
+  assert.throws(() => manager.addBucket({ name: 'UPPERCASE' }), /BUCKET_NAME_INVALID/)
+  assert.throws(() => manager.addBucket({ name: 'ab' }), /BUCKET_NAME_INVALID/)
+  assert.throws(() => manager.addBucket({ name: '-invalid' }), /BUCKET_NAME_INVALID/)
+  assert.equal(manager.addBucket({ name: 'valid-backup-01' }).name, 'valid-backup-01')
+})
 
-  assert.equal(added, 2)
-  assert.deepEqual(
-    manager
-      .getBuckets()
-      .map((bucket) => bucket.name)
-      .sort(),
-    ['archive', 'backup', 'images'],
-  )
+test('不允许添加重名 Bucket', () => {
+  const manager = new ConfigManager()
+  manager.save({ accountId: 'account', accessKeyId: 'key', secretAccessKey: 'secret', bucket: 'images' })
+
+  assert.throws(() => manager.addBucket({ name: 'images' }), /BUCKET_EXISTS/)
 })
 
 test('不允许删除最后一个 Bucket', () => {
