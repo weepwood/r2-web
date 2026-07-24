@@ -3,40 +3,80 @@ import { R2Client } from './r2-client.js'
 import { getCurrentLang } from './i18n.js'
 
 /** @param {ParentNode} root @param {string} selector */
-const q = (root, selector) => /** @type {HTMLElement} */ (root.querySelector(selector))
+function must(root, selector) {
+  const element = root.querySelector(selector)
+  if (!element) throw new Error(`Missing element: ${selector}`)
+  return /** @type {HTMLElement} */ (element)
+}
 
 const messages = {
   zh: {
-    manage: '管理 Bucket', add: '添加 Bucket', sync: '同步账户 Bucket', name: 'Bucket 名称', alias: '显示名称（可选）',
-    domain: '自定义域名（可选）', access: '可见性', public: '公开', private: '私有', active: '当前', switch: '切换',
-    save: '保存', remove: '删除', close: '关闭', empty: '尚未配置 Bucket', added: 'Bucket 已添加', saved: 'Bucket 已保存',
-    removed: 'Bucket 配置已删除', syncDone: '同步完成，新增 {count} 个 Bucket', syncNone: '没有发现新的 Bucket',
-    syncDenied: '当前密钥没有列出 Bucket 的权限，请手动添加。', confirmDelete: '仅删除本地配置，不会删除 R2 中的真实 Bucket。确认继续？',
-    lastBucket: '至少保留一个 Bucket', duplicate: '该 Bucket 已存在', required: '请输入 Bucket 名称', tip: '切换 Bucket 会刷新页面，以隔离文件缓存和上传上下文。',
+    manage: 'Bucket 管理', add: '添加 Bucket', list: 'Bucket 列表', name: 'Bucket 名称', alias: '显示名称',
+    domain: '自定义域名', access: '链接访问方式', public: '公开域名', private: '预签名链接', active: '当前使用',
+    save: '保存配置', remove: '删除配置', close: '关闭', switch: '切换到此 Bucket', edit: '编辑 Bucket',
+    empty: '尚未配置 Bucket', added: 'Bucket 已添加', saved: 'Bucket 配置已保存', removed: 'Bucket 配置已删除',
+    confirmDelete: '只删除浏览器中的本地配置，不会删除 Cloudflare R2 中的真实 Bucket。确认继续？',
+    lastBucket: '至少需要保留一个 Bucket', duplicate: '该 Bucket 已存在', required: '请输入 Bucket 名称', invalid: 'Bucket 名称格式不正确',
+    intro: 'Bucket 通过手动添加管理。切换后页面会刷新，以隔离文件缓存和上传上下文。',
+    account: '当前账户', unnamedAccount: 'Cloudflare R2', newBucket: '新建 Bucket', optional: '可选',
+    domainHint: '自定义域名只用于生成公开文件链接，文件管理始终访问 R2 S3 API 域名。',
+    accessHint: '此选项不会修改 Cloudflare 中 Bucket 的真实公开状态，只决定复制链接时使用公开域名还是预签名 URL。',
+    connection: '连接与跨域检查', origin: '当前网页 Origin', test: '测试当前 Bucket', testing: '正在测试…', testOk: '连接成功，当前凭据可以读取此 Bucket。',
+    testFirst: '请先切换到此 Bucket，再进行连接测试。', tokenDenied: '访问被拒绝。请确认 API Token 已授权当前 Bucket，而不只是配置了 CORS。',
+    bucketMissing: 'Bucket 不存在或名称填写错误。', corsFailed: '浏览器无法读取响应。请检查当前 Origin 是否精确加入 CORS，并确认网络和 Token 权限。',
+    corsConfig: '推荐 CORS 配置', copyCors: '复制配置', copied: 'CORS 配置已复制',
+    corsHint: '配置后可能需要等待片刻，并清除浏览器中旧的预检缓存。Origin 不要带路径或结尾斜杠。',
   },
   zh_TW: {
-    manage: '管理 Bucket', add: '新增 Bucket', sync: '同步帳戶 Bucket', name: 'Bucket 名稱', alias: '顯示名稱（選填）',
-    domain: '自訂網域（選填）', access: '可見性', public: '公開', private: '私人', active: '目前', switch: '切換',
-    save: '儲存', remove: '刪除', close: '關閉', empty: '尚未設定 Bucket', added: 'Bucket 已新增', saved: 'Bucket 已儲存',
-    removed: 'Bucket 設定已刪除', syncDone: '同步完成，新增 {count} 個 Bucket', syncNone: '沒有發現新的 Bucket',
-    syncDenied: '目前金鑰沒有列出 Bucket 的權限，請手動新增。', confirmDelete: '只刪除本機設定，不會刪除 R2 中的真實 Bucket。確定繼續？',
-    lastBucket: '至少保留一個 Bucket', duplicate: '此 Bucket 已存在', required: '請輸入 Bucket 名稱', tip: '切換 Bucket 會重新整理頁面，以隔離檔案快取和上傳內容。',
+    manage: 'Bucket 管理', add: '新增 Bucket', list: 'Bucket 清單', name: 'Bucket 名稱', alias: '顯示名稱',
+    domain: '自訂網域', access: '連結存取方式', public: '公開網域', private: '預簽名連結', active: '目前使用',
+    save: '儲存設定', remove: '刪除設定', close: '關閉', switch: '切換到此 Bucket', edit: '編輯 Bucket',
+    empty: '尚未設定 Bucket', added: 'Bucket 已新增', saved: 'Bucket 設定已儲存', removed: 'Bucket 設定已刪除',
+    confirmDelete: '只刪除瀏覽器中的本機設定，不會刪除 Cloudflare R2 中的真實 Bucket。確定繼續？',
+    lastBucket: '至少需要保留一個 Bucket', duplicate: '此 Bucket 已存在', required: '請輸入 Bucket 名稱', invalid: 'Bucket 名稱格式不正確',
+    intro: 'Bucket 透過手動新增管理。切換後頁面會重新整理，以隔離檔案快取與上傳內容。',
+    account: '目前帳戶', unnamedAccount: 'Cloudflare R2', newBucket: '新增 Bucket', optional: '選填',
+    domainHint: '自訂網域只用於產生公開檔案連結，檔案管理仍會存取 R2 S3 API 網域。',
+    accessHint: '此選項不會修改 Cloudflare 中 Bucket 的真實公開狀態，只決定複製連結時使用公開網域或預簽名 URL。',
+    connection: '連線與跨網域檢查', origin: '目前網頁 Origin', test: '測試目前 Bucket', testing: '測試中…', testOk: '連線成功，目前憑證可以讀取此 Bucket。',
+    testFirst: '請先切換到此 Bucket，再進行連線測試。', tokenDenied: '存取遭拒。請確認 API Token 已授權目前 Bucket，而不只是設定了 CORS。',
+    bucketMissing: 'Bucket 不存在或名稱錯誤。', corsFailed: '瀏覽器無法讀取回應。請檢查目前 Origin 是否精確加入 CORS，並確認網路與 Token 權限。',
+    corsConfig: '建議 CORS 設定', copyCors: '複製設定', copied: 'CORS 設定已複製',
+    corsHint: '設定後可能需要稍候，並清除瀏覽器舊的預檢快取。Origin 不要帶路徑或結尾斜線。',
   },
   en: {
-    manage: 'Manage buckets', add: 'Add bucket', sync: 'Sync account buckets', name: 'Bucket name', alias: 'Display name (optional)',
-    domain: 'Custom domain (optional)', access: 'Visibility', public: 'Public', private: 'Private', active: 'Active', switch: 'Switch',
-    save: 'Save', remove: 'Remove', close: 'Close', empty: 'No bucket configured', added: 'Bucket added', saved: 'Bucket saved',
-    removed: 'Bucket configuration removed', syncDone: 'Sync complete. Added {count} bucket(s).', syncNone: 'No new buckets found.',
-    syncDenied: 'This token cannot list buckets. Add an authorized bucket manually.', confirmDelete: 'This only removes the local configuration and will not delete the real R2 bucket. Continue?',
-    lastBucket: 'Keep at least one bucket', duplicate: 'This bucket already exists', required: 'Enter a bucket name', tip: 'Switching buckets reloads the page to isolate caches and upload context.',
+    manage: 'Bucket manager', add: 'Add bucket', list: 'Buckets', name: 'Bucket name', alias: 'Display name',
+    domain: 'Custom domain', access: 'Link mode', public: 'Public domain', private: 'Presigned URL', active: 'Active',
+    save: 'Save', remove: 'Remove', close: 'Close', switch: 'Switch to this bucket', edit: 'Edit bucket',
+    empty: 'No bucket configured', added: 'Bucket added', saved: 'Bucket saved', removed: 'Bucket removed',
+    confirmDelete: 'This only removes the local browser configuration. It will not delete the real R2 bucket. Continue?',
+    lastBucket: 'Keep at least one bucket', duplicate: 'This bucket already exists', required: 'Enter a bucket name', invalid: 'Invalid bucket name',
+    intro: 'Buckets are added manually. Switching reloads the page to isolate caches and upload context.',
+    account: 'Account', unnamedAccount: 'Cloudflare R2', newBucket: 'New bucket', optional: 'Optional',
+    domainHint: 'The custom domain is only used for public links. File management always uses the R2 S3 API domain.',
+    accessHint: 'This does not change the real Cloudflare bucket visibility. It only controls public-domain versus presigned links.',
+    connection: 'Connection and CORS check', origin: 'Current page origin', test: 'Test active bucket', testing: 'Testing…', testOk: 'Connection succeeded. The credentials can read this bucket.',
+    testFirst: 'Switch to this bucket before testing it.', tokenDenied: 'Access denied. Confirm that the API token is authorized for this bucket, not only that CORS is configured.',
+    bucketMissing: 'The bucket does not exist or its name is incorrect.', corsFailed: 'The browser could not read the response. Check the exact Origin in CORS, network access, and token scope.',
+    corsConfig: 'Recommended CORS policy', copyCors: 'Copy policy', copied: 'CORS policy copied',
+    corsHint: 'Changes may take a moment. Clear cached preflight responses if needed. Do not include a path or trailing slash in Origin.',
   },
   ja: {
-    manage: 'Bucket 管理', add: 'Bucket を追加', sync: 'アカウントの Bucket を同期', name: 'Bucket 名', alias: '表示名（任意）',
-    domain: 'カスタムドメイン（任意）', access: '公開範囲', public: '公開', private: '非公開', active: '現在', switch: '切り替え',
-    save: '保存', remove: '削除', close: '閉じる', empty: 'Bucket が設定されていません', added: 'Bucket を追加しました', saved: 'Bucket を保存しました',
-    removed: 'Bucket 設定を削除しました', syncDone: '同期完了。{count} 個の Bucket を追加しました。', syncNone: '新しい Bucket はありません。',
-    syncDenied: 'このキーには Bucket 一覧権限がありません。手動で追加してください。', confirmDelete: 'ローカル設定のみ削除し、R2 の実 Bucket は削除しません。続行しますか？',
-    lastBucket: '少なくとも 1 つの Bucket を残してください', duplicate: 'この Bucket は既に存在します', required: 'Bucket 名を入力してください', tip: 'キャッシュとアップロード先を分離するため、Bucket 切り替え時にページを再読み込みします。',
+    manage: 'Bucket 管理', add: 'Bucket を追加', list: 'Bucket 一覧', name: 'Bucket 名', alias: '表示名',
+    domain: 'カスタムドメイン', access: 'リンク方式', public: '公開ドメイン', private: '署名付き URL', active: '使用中',
+    save: '保存', remove: '削除', close: '閉じる', switch: 'この Bucket に切り替え', edit: 'Bucket を編集',
+    empty: 'Bucket が設定されていません', added: 'Bucket を追加しました', saved: 'Bucket を保存しました', removed: 'Bucket を削除しました',
+    confirmDelete: 'ブラウザ内の設定のみ削除し、Cloudflare R2 の実 Bucket は削除しません。続行しますか？',
+    lastBucket: '少なくとも 1 つの Bucket を残してください', duplicate: 'この Bucket は既に存在します', required: 'Bucket 名を入力してください', invalid: 'Bucket 名の形式が正しくありません',
+    intro: 'Bucket は手動で追加します。切り替え時にページを再読み込みし、キャッシュとアップロード先を分離します。',
+    account: '現在のアカウント', unnamedAccount: 'Cloudflare R2', newBucket: '新しい Bucket', optional: '任意',
+    domainHint: 'カスタムドメインは公開リンク生成にのみ使用し、ファイル管理は R2 S3 API ドメインへアクセスします。',
+    accessHint: 'Cloudflare 上の実際の公開設定は変更しません。公開ドメインと署名付き URL のどちらを使うかだけを指定します。',
+    connection: '接続と CORS チェック', origin: '現在の Origin', test: '現在の Bucket をテスト', testing: 'テスト中…', testOk: '接続に成功しました。この認証情報で Bucket を読み取れます。',
+    testFirst: '先にこの Bucket へ切り替えてからテストしてください。', tokenDenied: 'アクセスが拒否されました。CORS だけでなく、API Token がこの Bucket を許可しているか確認してください。',
+    bucketMissing: 'Bucket が存在しないか、名前が正しくありません。', corsFailed: 'ブラウザが応答を読み取れません。CORS の Origin、ネットワーク、Token 権限を確認してください。',
+    corsConfig: '推奨 CORS 設定', copyCors: '設定をコピー', copied: 'CORS 設定をコピーしました',
+    corsHint: '反映に少し時間がかかる場合があります。必要に応じてプリフライトキャッシュを消去してください。Origin にパスや末尾のスラッシュは不要です。',
   },
 }
 
@@ -45,31 +85,24 @@ class BucketManagerUI {
   #config
   /** @type {HTMLDialogElement | null} */
   #dialog = null
+  /** @type {string | null} */
+  #selectedBucketId = null
 
   constructor() {
     this.#config = new ConfigManager()
   }
 
   init() {
-    this.#ensureStyles()
     this.#renderSwitcher()
     window.addEventListener('r2-config-changed', () => this.#renderSwitcher())
   }
 
+  /** @param {string} key @param {Record<string, string | number>} [params] */
   #m(key, params = {}) {
     const lang = getCurrentLang()
     let value = (messages[lang] || messages.zh)[key] || messages.zh[key] || key
     for (const [name, replacement] of Object.entries(params)) value = value.replace(`{${name}}`, String(replacement))
     return value
-  }
-
-  #ensureStyles() {
-    if (document.querySelector('link[data-bucket-manager-style]')) return
-    const link = document.createElement('link')
-    link.rel = 'stylesheet'
-    link.href = 'bucket-manager.css'
-    link.dataset.bucketManagerStyle = 'true'
-    document.head.append(link)
   }
 
   #renderSwitcher() {
@@ -90,7 +123,7 @@ class BucketManagerUI {
     for (const bucket of profile.buckets) {
       const option = document.createElement('option')
       option.value = bucket.id
-      option.textContent = bucket.alias ? `${bucket.alias} · ${bucket.name}` : bucket.name
+      option.textContent = bucket.alias || bucket.name
       option.selected = bucket.id === active?.id
       select.append(option)
     }
@@ -102,7 +135,7 @@ class BucketManagerUI {
     const manage = document.createElement('button')
     manage.type = 'button'
     manage.className = 'bucket-manage-btn'
-    manage.textContent = '⋯'
+    manage.innerHTML = '<span aria-hidden="true">⚙</span>'
     manage.title = this.#m('manage')
     manage.setAttribute('aria-label', this.#m('manage'))
     manage.addEventListener('click', () => this.#openDialog())
@@ -113,45 +146,52 @@ class BucketManagerUI {
 
   #openDialog() {
     this.#dialog?.remove()
+    const active = this.#config.getActiveBucket()
+    this.#selectedBucketId = active?.id || null
+
     const dialog = document.createElement('dialog')
     dialog.className = 'bucket-manager-dialog'
     dialog.innerHTML = `
       <div class="bucket-manager-panel">
         <header class="bucket-manager-header">
-          <div><h2></h2><p></p></div>
+          <div>
+            <h2></h2>
+            <p class="bucket-manager-intro"></p>
+            <p class="bucket-manager-account"></p>
+          </div>
           <button type="button" class="bucket-dialog-close" aria-label="${this.#m('close')}">×</button>
         </header>
-        <div class="bucket-manager-actions">
-          <button type="button" class="btn secondary bucket-sync-btn"></button>
+        <div class="bucket-manager-layout">
+          <aside class="bucket-sidebar">
+            <div class="bucket-sidebar-header">
+              <strong></strong>
+              <button type="button" class="btn secondary sm bucket-add-btn"></button>
+            </div>
+            <div class="bucket-nav" role="listbox"></div>
+          </aside>
+          <main class="bucket-workspace">
+            <div class="bucket-editor"></div>
+            <section class="bucket-diagnostics"></section>
+          </main>
         </div>
-        <form class="bucket-add-form">
-          <div class="bucket-form-grid">
-            <input name="name" required autocomplete="off" />
-            <input name="alias" autocomplete="off" />
-            <input name="customDomain" type="url" autocomplete="off" />
-            <select name="bucketAccess"><option value="public"></option><option value="private"></option></select>
-          </div>
-          <button type="submit" class="btn primary"></button>
-        </form>
-        <div class="bucket-manager-status" role="status"></div>
-        <div class="bucket-list"></div>
+        <div class="bucket-manager-status" role="status" aria-live="polite"></div>
       </div>`
-    q(dialog, 'h2').textContent = this.#m('manage')
-    q(dialog, 'header p').textContent = this.#m('tip')
-    q(dialog, '.bucket-sync-btn').textContent = this.#m('sync')
-    q(dialog, 'input[name="name"]').setAttribute('placeholder', this.#m('name'))
-    q(dialog, 'input[name="alias"]').setAttribute('placeholder', this.#m('alias'))
-    q(dialog, 'input[name="customDomain"]').setAttribute('placeholder', this.#m('domain'))
-    q(dialog, 'option[value="public"]').textContent = this.#m('public')
-    q(dialog, 'option[value="private"]').textContent = this.#m('private')
-    q(dialog, '.bucket-add-form button').textContent = this.#m('add')
 
-    q(dialog, '.bucket-dialog-close').addEventListener('click', () => dialog.close())
+    must(dialog, 'h2').textContent = this.#m('manage')
+    must(dialog, '.bucket-manager-intro').textContent = this.#m('intro')
+    must(dialog, '.bucket-sidebar-header strong').textContent = this.#m('list')
+    must(dialog, '.bucket-add-btn').textContent = this.#m('add')
+    const profile = this.#config.getActiveProfile()
+    must(dialog, '.bucket-manager-account').textContent = `${this.#m('account')}：${profile?.name || this.#m('unnamedAccount')} · ${this.#maskAccount(profile?.accountId || '')}`
+
+    must(dialog, '.bucket-dialog-close').addEventListener('click', () => dialog.close())
+    must(dialog, '.bucket-add-btn').addEventListener('click', () => {
+      this.#selectedBucketId = null
+      this.#renderDialog()
+    })
     dialog.addEventListener('click', (event) => {
       if (event.target === dialog) dialog.close()
     })
-    q(dialog, '.bucket-add-form').addEventListener('submit', (event) => this.#addBucket(event))
-    q(dialog, '.bucket-sync-btn').addEventListener('click', (event) => this.#syncBuckets(event))
     dialog.addEventListener('close', () => {
       dialog.remove()
       if (this.#dialog === dialog) this.#dialog = null
@@ -159,193 +199,262 @@ class BucketManagerUI {
 
     document.body.append(dialog)
     this.#dialog = dialog
-    this.#renderBucketList()
+    this.#renderDialog()
     dialog.showModal()
   }
 
-  #renderBucketList() {
+  /** @param {string} value */
+  #maskAccount(value) {
+    if (!value) return '—'
+    if (value.length <= 8) return value
+    return `${value.slice(0, 4)}…${value.slice(-4)}`
+  }
+
+  #renderDialog() {
+    this.#renderSidebar()
+    this.#renderEditor()
+    this.#renderDiagnostics()
+  }
+
+  #renderSidebar() {
     if (!this.#dialog) return
-    const list = this.#dialog.querySelector('.bucket-list')
-    list.replaceChildren()
+    const nav = must(this.#dialog, '.bucket-nav')
+    nav.replaceChildren()
     const profile = this.#config.getActiveProfile()
     const active = this.#config.getActiveBucket()
+
     if (!profile || profile.buckets.length === 0) {
       const empty = document.createElement('p')
       empty.className = 'bucket-empty'
       empty.textContent = this.#m('empty')
-      list.append(empty)
+      nav.append(empty)
       return
     }
 
     for (const bucket of profile.buckets) {
-      const row = document.createElement('article')
-      row.className = 'bucket-row'
-      row.dataset.bucketId = bucket.id
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'bucket-nav-item'
+      button.dataset.selected = String(bucket.id === this.#selectedBucketId)
+      button.setAttribute('role', 'option')
+      button.setAttribute('aria-selected', String(bucket.id === this.#selectedBucketId))
 
-      const heading = document.createElement('div')
-      heading.className = 'bucket-row-heading'
+      const text = document.createElement('span')
       const title = document.createElement('strong')
       title.textContent = bucket.alias || bucket.name
-      const detail = document.createElement('span')
-      detail.textContent = bucket.alias
-        ? bucket.name
-        : bucket.bucketAccess === 'private'
-          ? this.#m('private')
-          : this.#m('public')
-      heading.append(title, detail)
+      const detail = document.createElement('small')
+      detail.textContent = bucket.alias ? bucket.name : bucket.bucketAccess === 'private' ? this.#m('private') : this.#m('public')
+      text.append(title, detail)
+      button.append(text)
+
       if (bucket.id === active?.id) {
         const badge = document.createElement('em')
         badge.textContent = this.#m('active')
-        heading.append(badge)
+        button.append(badge)
       }
 
-      const fields = document.createElement('div')
-      fields.className = 'bucket-row-fields'
-      fields.append(
-        this.#input('name', bucket.name, this.#m('name')),
-        this.#input('alias', bucket.alias || '', this.#m('alias')),
-        this.#input('customDomain', bucket.customDomain || '', this.#m('domain'), 'url'),
-      )
-      const access = document.createElement('select')
-      access.name = 'bucketAccess'
-      for (const value of ['public', 'private']) {
-        const option = document.createElement('option')
-        option.value = value
-        option.textContent = this.#m(value)
-        option.selected = bucket.bucketAccess === value
-        access.append(option)
-      }
-      fields.append(access)
-
-      const actions = document.createElement('div')
-      actions.className = 'bucket-row-actions'
-      const save = this.#button(this.#m('save'), 'save')
-      const activate = this.#button(this.#m('switch'), 'activate')
-      const remove = this.#button(this.#m('remove'), 'remove', 'danger')
-      activate.disabled = bucket.id === active?.id
-      actions.append(save, activate, remove)
-      actions.addEventListener('click', (event) => this.#handleRowAction(event, profile.id, bucket.id))
-
-      row.append(heading, fields, actions)
-      list.append(row)
-    }
-  }
-
-  #input(name, value, placeholder, type = 'text') {
-    const input = document.createElement('input')
-    input.name = name
-    input.type = type
-    input.value = value
-    input.placeholder = placeholder
-    input.autocomplete = 'off'
-    return input
-  }
-
-  #button(label, action, variant = 'secondary') {
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.className = `btn ${variant} sm`
-    button.dataset.action = action
-    button.textContent = label
-    return button
-  }
-
-  #status(message, isError = false) {
-    if (!this.#dialog) return
-    const status = q(this.#dialog, '.bucket-manager-status')
-    status.textContent = message
-    status.setAttribute('data-error', String(isError))
-  }
-
-  #errorMessage(error) {
-    if (error.message === 'LAST_BUCKET') return this.#m('lastBucket')
-    if (error.message === 'BUCKET_EXISTS') return this.#m('duplicate')
-    if (error.message === 'BUCKET_NAME_REQUIRED') return this.#m('required')
-    return error.message || String(error)
-  }
-
-  #addBucket(event) {
-    event.preventDefault()
-    const form = event.currentTarget
-    const data = new FormData(form)
-    try {
-      this.#config.addBucket({
-        name: String(data.get('name') || ''),
-        alias: String(data.get('alias') || ''),
-        customDomain: String(data.get('customDomain') || ''),
-        bucketAccess: data.get('bucketAccess') === 'private' ? 'private' : 'public',
+      button.addEventListener('click', () => {
+        this.#selectedBucketId = bucket.id
+        this.#renderDialog()
       })
-      form.reset()
-      this.#status(this.#m('added'))
-      this.#renderBucketList()
-    } catch (error) {
-      this.#status(this.#errorMessage(error), true)
+      nav.append(button)
     }
   }
 
-  async #syncBuckets(event) {
-    const button = event.currentTarget
+  #renderEditor() {
+    if (!this.#dialog) return
+    const editor = must(this.#dialog, '.bucket-editor')
+    const bucket = this.#config.getBuckets().find((item) => item.id === this.#selectedBucketId) || null
+    const active = this.#config.getActiveBucket()
+    const isNew = !bucket
+
+    editor.innerHTML = `
+      <form class="bucket-editor-form">
+        <div class="bucket-editor-heading">
+          <div><span class="bucket-editor-kicker"></span><h3></h3></div>
+          <span class="bucket-active-badge" hidden></span>
+        </div>
+        <div class="bucket-field-grid">
+          <label><span>${this.#m('name')}</span><input name="name" required autocomplete="off" /></label>
+          <label><span>${this.#m('alias')} <small>${this.#m('optional')}</small></span><input name="alias" autocomplete="off" /></label>
+          <label class="bucket-field-wide"><span>${this.#m('domain')} <small>${this.#m('optional')}</small></span><input name="customDomain" type="url" autocomplete="off" placeholder="https://cdn.example.com" /></label>
+          <label><span>${this.#m('access')}</span><select name="bucketAccess"><option value="public">${this.#m('public')}</option><option value="private">${this.#m('private')}</option></select></label>
+        </div>
+        <div class="bucket-field-notes"><p>${this.#m('domainHint')}</p><p>${this.#m('accessHint')}</p></div>
+        <div class="bucket-editor-actions">
+          <button type="button" class="btn danger bucket-remove-btn" ${isNew ? 'hidden' : ''}>${this.#m('remove')}</button>
+          <span></span>
+          <button type="button" class="btn secondary bucket-switch-btn" ${isNew || bucket?.id === active?.id ? 'disabled' : ''}>${this.#m('switch')}</button>
+          <button type="submit" class="btn primary">${this.#m('save')}</button>
+        </div>
+      </form>`
+
+    must(editor, '.bucket-editor-kicker').textContent = isNew ? this.#m('add') : this.#m('edit')
+    must(editor, 'h3').textContent = isNew ? this.#m('newBucket') : bucket.alias || bucket.name
+    const badge = must(editor, '.bucket-active-badge')
+    if (bucket?.id === active?.id) {
+      badge.hidden = false
+      badge.textContent = this.#m('active')
+    }
+
+    const form = /** @type {HTMLFormElement} */ (must(editor, '.bucket-editor-form'))
+    const nameInput = /** @type {HTMLInputElement} */ (must(form, '[name="name"]'))
+    const aliasInput = /** @type {HTMLInputElement} */ (must(form, '[name="alias"]'))
+    const domainInput = /** @type {HTMLInputElement} */ (must(form, '[name="customDomain"]'))
+    const accessInput = /** @type {HTMLSelectElement} */ (must(form, '[name="bucketAccess"]'))
+    nameInput.value = bucket?.name || ''
+    aliasInput.value = bucket?.alias || ''
+    domainInput.value = bucket?.customDomain || ''
+    accessInput.value = bucket?.bucketAccess || 'private'
+
+    form.addEventListener('submit', (event) => this.#saveBucket(event, bucket?.id || null))
+    must(form, '.bucket-switch-btn').addEventListener('click', () => this.#activateBucket(bucket?.id || ''))
+    must(form, '.bucket-remove-btn').addEventListener('click', () => this.#removeBucket(bucket?.id || ''))
+  }
+
+  #renderDiagnostics() {
+    if (!this.#dialog) return
+    const diagnostics = must(this.#dialog, '.bucket-diagnostics')
+    const active = this.#config.getActiveBucket()
+    const selectedIsActive = Boolean(active && active.id === this.#selectedBucketId)
+    const cors = this.#corsPolicy()
+
+    diagnostics.innerHTML = `
+      <div class="bucket-diagnostics-heading"><h3>${this.#m('connection')}</h3><button type="button" class="btn secondary sm bucket-test-btn" ${selectedIsActive ? '' : 'disabled'}>${this.#m('test')}</button></div>
+      <dl><div><dt>${this.#m('origin')}</dt><dd></dd></div></dl>
+      <div class="bucket-cors-card">
+        <div><strong>${this.#m('corsConfig')}</strong><button type="button" class="btn secondary sm bucket-copy-cors-btn">${this.#m('copyCors')}</button></div>
+        <pre></pre>
+        <p>${this.#m('corsHint')}</p>
+      </div>`
+    must(diagnostics, 'dd').textContent = window.location.origin
+    must(diagnostics, 'pre').textContent = cors
+    must(diagnostics, '.bucket-test-btn').addEventListener('click', (event) => this.#testConnection(event, selectedIsActive))
+    must(diagnostics, '.bucket-copy-cors-btn').addEventListener('click', () => this.#copyCors(cors))
+  }
+
+  #corsPolicy() {
+    return JSON.stringify(
+      [
+        {
+          AllowedOrigins: [window.location.origin],
+          AllowedMethods: ['GET', 'PUT', 'DELETE', 'HEAD'],
+          AllowedHeaders: ['Content-Type', 'x-amz-copy-source', 'x-amz-metadata-directive'],
+          ExposeHeaders: ['ETag', 'Content-Length', 'Content-Type', 'Last-Modified'],
+          MaxAgeSeconds: 3600,
+        },
+      ],
+      null,
+      2,
+    )
+  }
+
+  /** @param {string} cors */
+  async #copyCors(cors) {
+    try {
+      await navigator.clipboard.writeText(cors)
+      this.#status(this.#m('copied'))
+    } catch (error) {
+      this.#status(error instanceof Error ? error.message : String(error), true)
+    }
+  }
+
+  /** @param {Event} event @param {boolean} selectedIsActive */
+  async #testConnection(event, selectedIsActive) {
+    if (!selectedIsActive) {
+      this.#status(this.#m('testFirst'), true)
+      return
+    }
+    const button = /** @type {HTMLButtonElement} */ (event.currentTarget)
     button.disabled = true
+    const oldText = button.textContent
+    button.textContent = this.#m('testing')
     try {
       const client = new R2Client()
       client.init(this.#config)
-      const discovered = []
-      let token = ''
-      do {
-        const page = await client.listBuckets(token)
-        discovered.push(...page.buckets)
-        token = page.isTruncated ? page.nextToken : ''
-      } while (token)
-      const added = this.#config.mergeDiscoveredBuckets(discovered)
-      this.#status(added ? this.#m('syncDone', { count: added }) : this.#m('syncNone'))
-      this.#renderBucketList()
+      await client.testConnection()
+      this.#status(this.#m('testOk'))
     } catch (error) {
-      this.#status(error.message === 'HTTP_403' ? this.#m('syncDenied') : this.#errorMessage(error), true)
+      const message = error instanceof Error ? error.message : String(error)
+      if (message === 'HTTP_403') this.#status(this.#m('tokenDenied'), true)
+      else if (message === 'HTTP_404') this.#status(this.#m('bucketMissing'), true)
+      else if (error instanceof TypeError) this.#status(this.#m('corsFailed'), true)
+      else this.#status(message, true)
     } finally {
       button.disabled = false
+      button.textContent = oldText
     }
   }
 
-  #handleRowAction(event, profileId, bucketId) {
-    const button = event.target.closest('button[data-action]')
-    if (!button) return
-    const row = button.closest('.bucket-row')
-    const action = button.dataset.action
+  /** @param {Event} event @param {string | null} bucketId */
+  #saveBucket(event, bucketId) {
+    event.preventDefault()
+    const form = /** @type {HTMLFormElement} */ (event.currentTarget)
+    const data = new FormData(form)
+    const value = {
+      name: String(data.get('name') || ''),
+      alias: String(data.get('alias') || ''),
+      customDomain: String(data.get('customDomain') || ''),
+      bucketAccess: data.get('bucketAccess') === 'public' ? /** @type {'public'} */ ('public') : /** @type {'private'} */ ('private'),
+    }
     try {
-      if (action === 'activate') {
-        this.#config.setActiveBucket(profileId, bucketId)
-        window.location.reload()
-        return
+      if (bucketId) {
+        this.#config.updateBucket(bucketId, value)
+        this.#selectedBucketId = bucketId
+        this.#status(this.#m('saved'))
+      } else {
+        const added = this.#config.addBucket(value)
+        this.#selectedBucketId = added.id
+        this.#status(this.#m('added'))
       }
-      if (action === 'remove') {
-        if (!window.confirm(this.#m('confirmDelete'))) return
-        const wasActive = this.#config.getActiveBucket()?.id === bucketId
-        this.#config.removeBucket(bucketId)
-        if (wasActive) window.location.reload()
-        else {
-          this.#status(this.#m('removed'))
-          this.#renderBucketList()
-        }
-        return
-      }
-      if (action === 'save') {
-        const field = (name) => row.querySelector(`[name="${name}"]`).value
-        const wasActive = this.#config.getActiveBucket()?.id === bucketId
-        this.#config.updateBucket(bucketId, {
-          name: field('name'),
-          alias: field('alias'),
-          customDomain: field('customDomain'),
-          bucketAccess: field('bucketAccess') === 'private' ? 'private' : 'public',
-        })
-        if (wasActive) window.location.reload()
-        else {
-          this.#status(this.#m('saved'))
-          this.#renderBucketList()
-        }
-      }
+      this.#renderDialog()
     } catch (error) {
       this.#status(this.#errorMessage(error), true)
     }
+  }
+
+  /** @param {string} bucketId */
+  #activateBucket(bucketId) {
+    const profile = this.#config.getActiveProfile()
+    if (!profile || !bucketId) return
+    this.#config.setActiveBucket(profile.id, bucketId)
+    window.location.reload()
+  }
+
+  /** @param {string} bucketId */
+  #removeBucket(bucketId) {
+    if (!bucketId || !window.confirm(this.#m('confirmDelete'))) return
+    try {
+      const wasActive = this.#config.getActiveBucket()?.id === bucketId
+      this.#config.removeBucket(bucketId)
+      if (wasActive) {
+        window.location.reload()
+        return
+      }
+      this.#selectedBucketId = this.#config.getActiveBucket()?.id || null
+      this.#status(this.#m('removed'))
+      this.#renderDialog()
+    } catch (error) {
+      this.#status(this.#errorMessage(error), true)
+    }
+  }
+
+  /** @param {unknown} error */
+  #errorMessage(error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (message === 'LAST_BUCKET') return this.#m('lastBucket')
+    if (message === 'BUCKET_EXISTS') return this.#m('duplicate')
+    if (message === 'BUCKET_NAME_REQUIRED') return this.#m('required')
+    if (message === 'BUCKET_NAME_INVALID') return this.#m('invalid')
+    return message
+  }
+
+  /** @param {string} message @param {boolean} [isError] */
+  #status(message, isError = false) {
+    if (!this.#dialog) return
+    const status = must(this.#dialog, '.bucket-manager-status')
+    status.textContent = message
+    status.dataset.error = String(isError)
   }
 }
 
