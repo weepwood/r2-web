@@ -17,8 +17,20 @@ test('Bucket 管理仅保留手动添加', async () => {
   const source = await read('src/js/bucket-manager.js')
 
   assert.doesNotMatch(source, /同步账户 Bucket|Sync account buckets|#syncBuckets|listBuckets\s*\(/)
-  assert.match(source, /bucket-add-btn/)
+  assert.match(source, /bucket-add-toggle/)
   assert.match(source, /testConnection\(\)/)
+})
+
+test('Bucket 管理集成进原有设置页', async () => {
+  const source = await read('src/js/bucket-manager.js')
+  const styles = await read('src/bucket-manager.css')
+
+  assert.match(source, /\[data-panel="r2"\]\s+\.config-section/)
+  assert.match(source, /bucket-settings-manager/)
+  assert.match(source, /class="field bucket-current-field"/)
+  assert.match(source, /class="btn secondary sm bucket-add-toggle"/)
+  assert.doesNotMatch(source, /bucket-manager-dialog|bucket-manage-btn|showModal\(/)
+  assert.doesNotMatch(styles, /\.bucket-manager-dialog|\.bucket-manage-btn/)
 })
 
 test('推荐 CORS 规则与实际请求头保持一致', async () => {

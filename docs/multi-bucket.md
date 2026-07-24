@@ -5,12 +5,28 @@ R2 Web 支持在同一个 Cloudflare R2 账户和同一组 S3 API 凭据下手�
 ## 添加 Bucket
 
 1. 先按原有方式配置 Account ID、Access Key ID、Secret Access Key 和第一个 Bucket。
-2. 进入文件管理界面后，点击顶部 Bucket 选择器右侧的管理按钮。
-3. 点击“添加 Bucket”，填写 Bucket 名称。
-4. 可选填写显示名称、自定义域名和链接访问方式。
-5. 保存后，在左侧列表选择该 Bucket，再点击“切换到此 Bucket”。
+2. 进入文件管理界面后，点击右上角“设置”。
+3. 切换到“R2 设置”页签，在“当前 Bucket”区域点击“添加 Bucket”。
+4. 填写 Bucket 名称，可选填写显示名称、自定义域名和链接访问方式。
+5. 点击“添加并切换”，页面刷新后开始使用新 Bucket。
+
+顶部仍保留 Bucket 快速切换器，但添加、删除、连接测试和 CORS 配置都集中在设置页中。
 
 删除操作只会删除浏览器中的本地配置，不会删除 Cloudflare R2 中的真实 Bucket。
+
+## 界面说明
+
+Bucket 管理复用原设置页的表单、按钮、间距和响应式布局，不再使用独立管理弹窗。
+
+“R2 设置”页中包括：
+
+- 当前 Bucket 选择器；
+- 添加和删除 Bucket；
+- 当前 Bucket 的名称、显示名称、自定义域名和链接访问方式；
+- 连接测试；
+- 根据当前网页 Origin 生成的推荐 CORS 配置。
+
+显示名称只影响界面展示，不会修改 Cloudflare 中的真实 Bucket 名称。
 
 ## API Token 权限
 
@@ -22,7 +38,7 @@ R2 Web 支持在同一个 Cloudflare R2 账户和同一组 S3 API 凭据下手�
 
 ## CORS 配置
 
-管理界面的“连接与跨域检查”会根据当前网页的 `window.location.origin` 生成推荐规则。Origin 必须精确匹配，例如：
+“R2 设置”中的“连接与跨域”区域会根据当前网页的 `window.location.origin` 生成推荐规则。Origin 必须精确匹配，例如：
 
 - `https://example.com`
 - `http://localhost:5500`
