@@ -24,7 +24,7 @@ Here are some common static hosting platforms for deployment. Click the buttons 
 | Netlify          | [![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)][netlify-deploy]      |
 | Cloudflare Pages | [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)][cloudflare-deploy] |
 
-Other services can simply deploy the `src` directory. After deployment, remember to update your CORS rules to allow your domain to access the R2 API.
+Other services can simply deploy the `src` directory. After deployment, remember to update your CORS rules to allow your origin to access the R2 API.
 
 ## Feedback
 
@@ -59,6 +59,7 @@ Other services can simply deploy the `src` directory. After deployment, remember
 - **File management**: Browse directories, rename, move, delete — easily handle large collections of files.
 - **File browsing**: Built-in image/video/audio/text preview — quickly inspect content without downloading.
 - **Private image hosting**: Drag & paste upload, auto compression, one-click copy as Markdown/HTML.
+- **Multiple buckets**: Manually add several buckets from one account and switch between them from the top bar.
 
 ## Design Philosophy
 
@@ -79,12 +80,13 @@ Other services can simply deploy the `src` directory. After deployment, remember
 
 | Category            | Details                                                                                                                                  |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **File Management** | Directory browsing, paginated loading, lazy thumbnail loading; Sort by name / date / size; Rename, move, copy, delete (recursive); Batch operations with multi-select |
-| **File Upload**     | Drag / paste / picker upload; Filename templates (hash, date, UUID placeholders); Auto image compression before upload (WebAssembly) |
-| **File Preview**    | Image preview (common formats); Inline video / audio player; Text file preview with syntax highlighting                              |
-| **Link Copy**       | Direct URL, Markdown, HTML, pre-signed URL                                                                                               |
-| **Personalization** | Simplified / Traditional Chinese, English, Japanese; Dark mode (follows system); Config share link / QR code                         |
-| **PWA**             | Install to desktop, native-like experience                                                                                               |
+| **File Management** | Directory browsing, paginated loading, lazy thumbnail loading; sort by name/date/size; rename, move, copy, delete; batch operations     |
+| **Multiple Buckets**| Manually add, edit, remove local bucket profiles; top-bar switching; connection, token-scope, and CORS diagnostics                       |
+| **File Upload**     | Drag/paste/picker upload; filename templates; automatic image compression before upload                                                   |
+| **File Preview**    | Image preview; inline video/audio player; text file preview with syntax highlighting                                                       |
+| **Link Copy**       | Direct URL, Markdown, HTML, presigned URL                                                                                                  |
+| **Personalization** | Simplified/Traditional Chinese, English, Japanese; dark mode; safe config share link/QR code                                               |
+| **PWA**             | Install to desktop, native-like experience                                                                                                |
 
 ## Quick Start
 
@@ -96,16 +98,28 @@ In the Cloudflare dashboard, go to R2 → Bucket → Settings → CORS Policy an
 [
   {
     "AllowedOrigins": ["https://r2.viki.moe"],
-    "AllowedMethods": ["GET", "POST", "PUT", "DELETE", "HEAD"],
-    "AllowedHeaders": ["*"],
-    "ExposeHeaders": ["etag"],
-    "MaxAgeSeconds": 86400
+    "AllowedMethods": ["GET", "PUT", "DELETE", "HEAD"],
+    "AllowedHeaders": [
+      "Content-Type",
+      "x-amz-copy-source",
+      "x-amz-metadata-directive"
+    ],
+    "ExposeHeaders": [
+      "ETag",
+      "Content-Length",
+      "Content-Type",
+      "Last-Modified"
+    ],
+    "MaxAgeSeconds": 3600
   }
 ]
 ```
 
 > [!TIP]
-> Self-hosting? Just replace `AllowedOrigins` with your own domain.
+> For self-hosting, replace `AllowedOrigins` with the exact page origin, for example `https://example.com` or `http://localhost:5500`. Do not include a path or trailing slash.
+
+> [!IMPORTANT]
+> CORS only lets the browser read R2 responses. It does not grant an API token access to another bucket. For multiple buckets, the current Access Key must be authorized for every manually added bucket.
 
 ### 2. Enter Credentials
 
@@ -113,9 +127,11 @@ Visit [r2.viki.moe](https://r2.viki.moe), enter your R2 credentials, and connect
 
 ### 3. Start Using
 
-Browse files, drag & drop or press Ctrl+V to upload, right-click any file to rename, copy link, and more.
+Browse files, drag & drop or press Ctrl+V to upload, right-click any file to rename, copy links, and more.
 
-For image hosting, set a filename template with a hash placeholder, enable image compression for better performance and security.
+For image hosting, set a filename template with a hash placeholder and enable image compression for better performance and safety.
+
+See [Multiple Bucket Guide](./docs/multi-bucket.md) for adding buckets and diagnosing CORS or token-scope problems.
 
 ## Tips & Tricks
 
@@ -127,10 +143,10 @@ For image hosting, set a filename template with a hash placeholder, enable image
 
 ### Config Share Link
 
-Generate a "Config Share Link" or "Config QR Code" to quickly sync your settings across devices.
+Generate a config share link or QR code to synchronize bucket names and non-sensitive interface settings.
 
-> [!CAUTION]
-> The link contains your R2 access credentials. Do not share it on public platforms.
+> [!NOTE]
+> The link does not contain the Account ID, Access Key ID, or Secret Access Key. The receiving browser must enter its own account credentials.
 
 ### Cache Optimization
 
@@ -174,7 +190,7 @@ See [CLAUDE.md](./CLAUDE.md) for the full development guide.
 
 **Q: Are my credentials safe?**
 
-A: Credentials are stored only in your browser's localStorage and are never sent to any server. It is recommended to use API tokens with permissions limited to the specific bucket and non-admin read/write access.
+A: Credentials are stored only in your browser's localStorage and are never sent to an application server. Use a non-admin API token limited to the buckets you need. In a multi-bucket setup, add every managed bucket to the token scope.
 
 **Q: Which browsers are supported?**
 
@@ -186,15 +202,19 @@ A: Local compression uses WebAssembly and runs entirely in your browser — no f
 
 **Q: Can I self-host?**
 
-A: Yes — fork the repo, update `AllowedOrigins` in the CORS config to your domain, then deploy to any static hosting service (Cloudflare Pages, Vercel, Netlify, etc.).
+A: Yes — fork the repo, update `AllowedOrigins` in the CORS config to your exact origin, then deploy to any static hosting service.
 
 **Q: What does the config share link contain?**
 
-A: It includes your Access Key ID, Secret Access Key, bucket name, and other sensitive information. Do not share it publicly.
+A: It contains bucket names, display names, custom domains, and interface preferences. It does not contain the Account ID, Access Key ID, or Secret Access Key.
+
+**Q: Why can I not connect after configuring CORS?**
+
+A: First verify that `AllowedOrigins` exactly matches the browser origin. Then verify that the API token is authorized for the target bucket. A token scoped only to the original bucket returns 403 for a newly added bucket, and the browser may surface an unreadable error response as `Failed to fetch`.
 
 **Q: Why is my upload failing?**
 
-A: Check that your CORS policy is correct, your credentials are valid, and that the file is under 300 MB (use rclone for large files).
+A: Check the exact-origin CORS policy, the API token's bucket scope, credential validity, and the 300 MB file-size limit. Use rclone for large files.
 
 ## Roadmap
 
