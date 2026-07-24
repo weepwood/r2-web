@@ -7,9 +7,18 @@ import { STORAGE_KEY, THEME_KEY, LANG_KEY, VIEW_KEY, DENSITY_KEY, SORT_BY_KEY, S
 /** @typedef {{ accountId?: string; accessKeyId?: string; secretAccessKey?: string; endpoint?: string; bucket?: string; bucketId?: string; bucketAlias?: string; filenameTpl?: string; filenameTplScope?: string; customDomain?: string; bucketAccess?: BucketAccess; compressMode?: string; compressLevel?: string; tinifyKey?: string; uploadConcurrency?: number }} AppConfig */
 
 const SCHEMA_VERSION = 2
+const BUCKET_NAME_RE = /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/
 
 const randomId = (prefix) => `${prefix}-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`
 const cleanDomain = (value = '') => value.trim().replace(/\/+$/, '')
+
+/** @param {string} value */
+function validateBucketName(value) {
+  const name = value.trim()
+  if (!name) throw new Error('BUCKET_NAME_REQUIRED')
+  if (!BUCKET_NAME_RE.test(name)) throw new Error('BUCKET_NAME_INVALID')
+  return name
+}
 
 class ConfigManager {
   constructor() {
@@ -142,8 +151,7 @@ class ConfigManager {
 
   /** @param {{ name: string; alias?: string; customDomain?: string; bucketAccess?: BucketAccess }} input */
   addBucket(input) {
-    const name = input.name.trim()
-    if (!name) throw new Error('BUCKET_NAME_REQUIRED')
+    const name = validateBucketName(input.name)
     const state = this.loadState()
     const profile = this.#findActiveProfile(state)
     if (!profile) throw new Error('PROFILE_REQUIRED')
@@ -154,7 +162,7 @@ class ConfigManager {
       name,
       alias: input.alias?.trim() || '',
       customDomain: cleanDomain(input.customDomain),
-      bucketAccess: input.bucketAccess || 'public',
+      bucketAccess: input.bucketAccess || 'private',
     }
     profile.buckets.push(bucket)
     this.#saveState(state)
@@ -169,8 +177,7 @@ class ConfigManager {
     if (!bucket || !profile) throw new Error('BUCKET_NOT_FOUND')
 
     if (patch.name !== undefined) {
-      const name = patch.name.trim()
-      if (!name) throw new Error('BUCKET_NAME_REQUIRED')
+      const name = validateBucketName(patch.name)
       if (profile.buckets.some((item) => item.id !== bucketId && item.name === name)) throw new Error('BUCKET_EXISTS')
       bucket.name = name
     }
@@ -201,22 +208,6 @@ class ConfigManager {
     state.activeProfileId = profileId
     state.activeBucketId = bucketId
     this.#saveState(state)
-  }
-
-  /** @param {Array<{name: string}>} remoteBuckets */
-  mergeDiscoveredBuckets(remoteBuckets) {
-    const state = this.loadState()
-    const profile = this.#findActiveProfile(state)
-    if (!profile) throw new Error('PROFILE_REQUIRED')
-    let added = 0
-    for (const remote of remoteBuckets) {
-      const name = remote.name?.trim()
-      if (!name || profile.buckets.some((bucket) => bucket.name === name)) continue
-      profile.buckets.push({ id: randomId('bucket'), name, alias: '', customDomain: '', bucketAccess: 'private' })
-      added++
-    }
-    if (added > 0) this.#saveState(state)
-    return added
   }
 
   toBase64() {
