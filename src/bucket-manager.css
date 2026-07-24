@@ -134,6 +134,10 @@
   color: var(--text-danger);
 }
 
+#bucket-settings-manager[hidden] ~ #bucket-alias-field {
+  display: none;
+}
+
 #bucket-alias-field .field-hint {
   line-height: 1.5;
 }
