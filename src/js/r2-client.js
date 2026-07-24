@@ -4,6 +4,7 @@ import { encodeS3Key } from './utils.js'
 import { ConfigManager } from './config-manager.js'
 
 /** @typedef {{ key: string; isFolder: boolean; size?: number; lastModified?: string }} FileItem */
+/** @typedef {{ name: string; creationDate?: string }} BucketItem */
 
 class R2Client {
   /** @type {AwsClient | null} */
@@ -21,6 +22,37 @@ class R2Client {
       service: 's3',
       region: 'auto',
     })
+  }
+
+  /**
+   * 列出当前账户下可见的 Bucket。对象级 Token 可能返回 403，调用方应允许手动添加。
+   * @param {string} [continuationToken]
+   * @returns {Promise<{ buckets: BucketItem[]; isTruncated: boolean; nextToken: string }>}
+   */
+  async listBuckets(continuationToken = '') {
+    const config = /** @type {ConfigManager} */ (this.#config)
+    const url = new URL(config.getEndpoint() + '/')
+    url.searchParams.set('max-keys', '1000')
+    if (continuationToken) url.searchParams.set('continuation-token', continuationToken)
+
+    const res = await /** @type {AwsClient} */ (this.#client).fetch(url.toString())
+    if (!res.ok) {
+      if (res.status === 401) throw new Error('HTTP_401')
+      if (res.status === 403) throw new Error('HTTP_403')
+      throw new Error(`HTTP ${res.status}`)
+    }
+
+    const text = await res.text()
+    const doc = new DOMParser().parseFromString(text, 'application/xml')
+    const buckets = [...doc.querySelectorAll('Buckets > Bucket')]
+      .map((node) => ({
+        name: node.querySelector('Name')?.textContent ?? '',
+        creationDate: node.querySelector('CreationDate')?.textContent ?? '',
+      }))
+      .filter((bucket) => bucket.name)
+    const isTruncated = doc.querySelector('IsTruncated')?.textContent === 'true'
+    const nextToken = doc.querySelector('NextContinuationToken')?.textContent || ''
+    return { buckets, isTruncated, nextToken }
   }
 
   /** @param {string} [prefix] @param {string} [continuationToken] */

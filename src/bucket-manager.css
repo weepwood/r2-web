@@ -1,0 +1,205 @@
+.bucket-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.bucket-switcher-select {
+  max-width: min(320px, 36vw);
+  height: 34px;
+  padding: 0 30px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-base);
+}
+
+.bucket-manage-btn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.bucket-manage-btn:hover {
+  background: var(--bg-hover);
+}
+
+.bucket-manager-dialog {
+  width: min(880px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xl);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  box-shadow: 0 20px 60px rgb(0 0 0 / 22%);
+}
+
+.bucket-manager-dialog::backdrop {
+  background: var(--backdrop);
+  backdrop-filter: blur(3px);
+}
+
+.bucket-manager-panel {
+  max-height: calc(100vh - 28px);
+  padding: var(--sp-5);
+  overflow: auto;
+}
+
+.bucket-manager-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-5);
+  margin-bottom: var(--sp-4);
+}
+
+.bucket-manager-header h2 {
+  margin: 0 0 6px;
+  font-size: var(--text-xl);
+}
+
+.bucket-manager-header p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+}
+
+.bucket-dialog-close {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 26px;
+  cursor: pointer;
+}
+
+.bucket-manager-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--sp-3);
+}
+
+.bucket-add-form {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--bg-secondary);
+}
+
+.bucket-form-grid,
+.bucket-row-fields {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1.4fr 0.7fr;
+  gap: var(--sp-2);
+  flex: 1;
+}
+
+.bucket-add-form input,
+.bucket-add-form select,
+.bucket-row input,
+.bucket-row select {
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.bucket-manager-status {
+  min-height: 22px;
+  padding: var(--sp-2) 2px 2px;
+  color: var(--accent);
+  font-size: var(--text-base);
+}
+
+.bucket-manager-status[data-error='true'] {
+  color: var(--text-danger);
+}
+
+.bucket-list {
+  display: grid;
+  gap: 10px;
+  margin-top: var(--sp-2);
+}
+
+.bucket-row {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+}
+
+.bucket-row-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin-bottom: 10px;
+}
+
+.bucket-row-heading strong {
+  font-size: 15px;
+}
+
+.bucket-row-heading span {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.bucket-row-heading em {
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  background: var(--accent-subtle);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-style: normal;
+}
+
+.bucket-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.bucket-empty {
+  padding: 28px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .bucket-switcher-select {
+    max-width: 48vw;
+  }
+
+  .bucket-add-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .bucket-form-grid,
+  .bucket-row-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .bucket-row-actions {
+    justify-content: stretch;
+  }
+
+  .bucket-row-actions .btn {
+    flex: 1;
+  }
+}
