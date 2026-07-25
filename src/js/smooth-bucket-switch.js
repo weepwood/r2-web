@@ -100,8 +100,8 @@ function trackMethods(prototype, names) {
         state.busyCount = Math.max(0, state.busyCount - 1)
       }
     }
-    /** @type {any} */ (wrapped)[PATCHED] = true
     target[name] = wrapped
+    target[name][PATCHED] = true
   }
 }
 
