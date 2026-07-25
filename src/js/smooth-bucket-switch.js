@@ -100,7 +100,7 @@ function trackMethods(prototype, names) {
         state.busyCount = Math.max(0, state.busyCount - 1)
       }
     }
-    wrapped[PATCHED] = true
+    /** @type {any} */ (wrapped)[PATCHED] = true
     target[name] = wrapped
   }
 }
@@ -112,7 +112,7 @@ function patchBusyOperations() {
 }
 
 function nextFrame() {
-  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(undefined))))
 }
 
 /** @param {number} [timeout] */
@@ -128,7 +128,7 @@ function waitForExplorerIdle(timeout = 30000) {
       settled = true
       observer.disconnect()
       clearTimeout(timer)
-      resolve()
+      resolve(undefined)
     }
     const observer = new MutationObserver(() => {
       if (skeleton.hidden) finish()
@@ -200,16 +200,21 @@ function setSwitchingState(switching, label = '') {
     if (label) browser.setAttribute('data-bucket-label', label)
     else browser.removeAttribute('data-bucket-label')
   }
-  document.querySelectorAll('.bucket-switcher-select, #bucket-settings-select, .bucket-add-confirm, .bucket-remove-btn').forEach((element) => {
-    const control = /** @type {HTMLButtonElement | HTMLSelectElement} */ (element)
-    control.disabled = switching
+
+  const buckets = new ConfigManager().getBuckets()
+  document.querySelectorAll('.bucket-switcher-select, #bucket-settings-select').forEach((element) => {
+    /** @type {HTMLSelectElement} */ (element).disabled = switching
   })
+  const addButton = /** @type {HTMLButtonElement | null} */ (document.querySelector('.bucket-add-confirm'))
+  if (addButton) addButton.disabled = switching
+  const removeButton = /** @type {HTMLButtonElement | null} */ (document.querySelector('.bucket-remove-btn'))
+  if (removeButton) removeButton.disabled = switching || buckets.length <= 1
 }
 
 function operationIsBusy() {
   if (state.busyCount > 0) return true
   const uploadPanel = /** @type {HTMLElement | null} */ (document.querySelector('#upload-panel'))
-  if (uploadPanel && !uploadPanel.hidden) return true
+  if (uploadPanel && !uploadPanel.hidden && !uploadPanel.querySelector('.upload-progress-bar')) return true
   return Boolean(document.querySelector('#upload-panel .upload-progress-bar:not(.done):not(.error)'))
 }
 
@@ -226,7 +231,8 @@ function switchErrorMessage(error) {
 async function refreshExplorer(label) {
   const previewDialog = /** @type {HTMLDialogElement | null} */ (document.querySelector('#preview-dialog[open]'))
   previewDialog?.close()
-  document.querySelector('#context-menu')?.hidePopover?.()
+  const contextMenu = /** @type {HTMLElement | null} */ (document.querySelector('#context-menu'))
+  contextMenu?.hidePopover?.()
   if (document.querySelector('#app.batch-mode')) {
     /** @type {HTMLButtonElement | null} */ (document.querySelector('#batch-cancel-btn'))?.click()
   }
@@ -391,7 +397,10 @@ function installSmoothBucketSwitch() {
   window.addEventListener('r2-config-changed', () => {
     queueMicrotask(() => {
       syncActiveBucketFields()
-      if (state.switching) setSwitchingState(true, new ConfigManager().getActiveBucket()?.alias || new ConfigManager().getActiveBucket()?.name || '')
+      if (state.switching) {
+        const active = new ConfigManager().getActiveBucket()
+        setSwitchingState(true, active?.alias || active?.name || '')
+      }
     })
   })
   queueMicrotask(syncActiveBucketFields)
