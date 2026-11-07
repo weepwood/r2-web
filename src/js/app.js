@@ -223,6 +223,13 @@ class App {
     $('#paste-hint-text').textContent = t('pasteHint')
 
     $('#load-more-btn').textContent = t('loadMore')
+    const filterInput = /** @type {HTMLInputElement} */ ($('#file-filter-input'))
+    filterInput.placeholder = t('filterPlaceholder')
+    filterInput.setAttribute('aria-label', t('filterPlaceholder'))
+    $('#file-filter-clear').setAttribute('aria-label', t('filterClear'))
+    $('#filter-empty-title').textContent = t('filterNoResults')
+    $('#filter-empty-hint').textContent = t('filterTryAgain')
+    $('#filter-empty-clear-btn').textContent = t('filterClear')
     this.#explorer?.updateCountDisplay()
 
     $('[data-action="preview"] span').textContent = t('preview')
@@ -378,9 +385,8 @@ class App {
       $('#batch-select-all-text').textContent = t('batchSelectAll')
       return
     }
-    const total = document.querySelectorAll('#file-grid .file-card').length
-    const selected = this.#explorer.selectionCount
-    const allSelected = total > 0 && selected === total
+    const visibleCards = [...document.querySelectorAll('#file-grid .file-card:not([hidden])')]
+    const allSelected = visibleCards.length > 0 && visibleCards.every((card) => card.classList.contains('selected'))
     $('#batch-select-all-text').textContent = allSelected ? t('batchDeselectAll') : t('batchSelectAll')
   }
 
@@ -612,6 +618,36 @@ class App {
   }
 
   #bindAppEvents() {
+    const filterInput = /** @type {HTMLInputElement} */ ($('#file-filter-input'))
+    const clearFilter = () => {
+      filterInput.value = ''
+      $('#file-filter-clear').hidden = true
+      /** @type {FileExplorer} */ (this.#explorer).setFilterQuery('')
+      this.#updateSelectAllBtn()
+      filterInput.focus()
+    }
+
+    filterInput.addEventListener('input', () => {
+      $('#file-filter-clear').hidden = filterInput.value.length === 0
+      /** @type {FileExplorer} */ (this.#explorer).setFilterQuery(filterInput.value)
+      this.#updateSelectAllBtn()
+    })
+    $('#file-filter-clear').addEventListener('click', clearFilter)
+    $('#filter-empty-clear-btn').addEventListener('click', clearFilter)
+    filterInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && filterInput.value) {
+        e.preventDefault()
+        clearFilter()
+      }
+    })
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || !this.#config.isValid()) return
+      if (document.querySelector('dialog[open]')) return
+      if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable="true"]')) return
+      e.preventDefault()
+      filterInput.focus()
+    })
+
     $('#refresh-btn').addEventListener('click', async () => {
       const btn = /** @type {HTMLElement} */ ($('#refresh-btn'))
       btn.classList.add('refreshing')
@@ -832,9 +868,9 @@ class App {
     })
 
     $('#batch-select-all-btn').addEventListener('click', () => {
-      const total = document.querySelectorAll('#file-grid .file-card').length
-      const selected = /** @type {FileExplorer} */ (this.#explorer).selectionCount
-      if (total > 0 && selected === total) {
+      const visibleCards = [...document.querySelectorAll('#file-grid .file-card:not([hidden])')]
+      const allSelected = visibleCards.length > 0 && visibleCards.every((card) => card.classList.contains('selected'))
+      if (allSelected) {
         /** @type {FileExplorer} */ (this.#explorer).clearSelection()
       } else {
         /** @type {FileExplorer} */ (this.#explorer).selectAll()
