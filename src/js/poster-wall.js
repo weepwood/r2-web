@@ -50,6 +50,8 @@ class PosterWall {
   #pointerTile = null
   #dragged = false
   #columnCount = 3
+  /** @type {Map<HTMLElement,boolean>} */
+  #backgroundInert = new Map()
 
   /**
    * @param {import('./r2-client.js').R2Client} r2
@@ -66,6 +68,10 @@ class PosterWall {
     this.#reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (event) => {
       this.#reducedMotion = event.matches
+      if (event.matches) {
+        this.#cancelCameraMotion()
+        for (const tile of this.#nodes.values()) tile.getAnimations().forEach((animation) => animation.cancel())
+      }
     })
     this.#bindEvents()
     new ResizeObserver(() => {
@@ -90,6 +96,12 @@ class PosterWall {
       return
     }
     this.#root.hidden = false
+    // Keep Tab inside the presentation, without blocking native top-layer dialogs.
+    for (const sibling of this.#root.parentElement?.children ?? []) {
+      if (!(sibling instanceof HTMLElement) || sibling === this.#root) continue
+      this.#backgroundInert.set(sibling, sibling.inert)
+      sibling.inert = true
+    }
     this.#columnCount = this.#viewport.clientWidth < 760 ? 2 : 3
     this.#items = items
     this.#hasMore = hasMore
@@ -115,6 +127,8 @@ class PosterWall {
   close() {
     if (!this.isOpen) return
     this.#root.hidden = true
+    for (const [sibling, wasInert] of this.#backgroundInert) sibling.inert = wasInert
+    this.#backgroundInert.clear()
     if (this.#renderFrame) cancelAnimationFrame(this.#renderFrame)
     this.#renderFrame = 0
     this.#cancelCameraMotion()
@@ -129,6 +143,8 @@ class PosterWall {
   }
 
   refreshLabels() {
+    this.#root.setAttribute('aria-label', t('viewWall'))
+    this.#viewport.setAttribute('aria-label', t('wallHelp'))
     document.querySelector('#wall-eyebrow').textContent = t('wallEyebrow')
     document.querySelector('#wall-title').textContent = t('wallTitle')
     document.querySelector('#wall-help').textContent = t('wallHelp')
@@ -203,6 +219,7 @@ class PosterWall {
     }
     const from = { ...this.#camera }
     const started = performance.now()
+    /** @param {number} now */
     const tick = (now) => {
       const t = Math.min(1, (now - started) / duration)
       const eased = 1 - Math.pow(1 - t, 3)
