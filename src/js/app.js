@@ -681,6 +681,7 @@ class App {
       const ok = await this.#ui.confirm(t('logoutConfirmTitle'), t('logoutConfirmMsg'))
       if (!ok) return
       this.#config.clear()
+      this.#details.close()
       $('#app').hidden = true
       this.#showHero()
     })
@@ -732,6 +733,7 @@ class App {
   #bindAppEvents() {
     const filterInput = /** @type {HTMLInputElement} */ ($('#file-filter-input'))
     const clearFilter = () => {
+      this.#details.close()
       filterInput.value = ''
       $('#file-filter-clear').hidden = true
       this.#explorer?.setFilterQuery('')
@@ -740,6 +742,7 @@ class App {
     }
 
     filterInput.addEventListener('input', () => {
+      this.#details.close()
       $('#file-filter-clear').hidden = filterInput.value.length === 0
       this.#explorer?.setFilterQuery(filterInput.value)
       this.#updateSelectAllBtn()
@@ -776,6 +779,13 @@ class App {
 
     $('#file-grid').addEventListener('click', (e) => {
       const target = /** @type {HTMLElement} */ (e.target)
+      const detailsButton = /** @type {HTMLElement | null} */ (target.closest('.file-card-details'))
+      if (detailsButton) {
+        e.stopPropagation()
+        const card = /** @type {HTMLElement | null} */ (detailsButton.closest('.file-card'))
+        if (card) this.#details.open(card)
+        return
+      }
       const menuBtn = /** @type {HTMLElement | null} */ (target.closest('.file-card-menu'))
       if (menuBtn) {
         e.stopPropagation()
