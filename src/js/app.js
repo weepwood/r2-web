@@ -16,8 +16,11 @@ import { ConfigManager } from './config-manager.js'
 import { FileExplorer } from './file-explorer.js'
 import { FileOperations } from './file-operations.js'
 import { FilePreview } from './file-preview.js'
+import { FileDetails } from './file-details.js'
+import { PosterWall } from './poster-wall.js'
 import { UploadManager } from './upload-manager.js'
 import { R2Client } from './r2-client.js'
+import { getThumbnailMode, setThumbnailMode } from './thumbnail-utils.js'
 import { UIManager } from './ui-manager.js'
 import { getCurrentLang, setLang, t } from './i18n.js'
 import { $, getErrorMessage } from './utils.js'
@@ -40,6 +43,10 @@ class App {
   #preview = null
   /** @type {FileOperations | null} */
   #ops = null
+  /** @type {FileDetails} */
+  #details
+  /** @type {PosterWall} */
+  #wall
   #appEventsBound = false
   #batchMode = false
   /** @type {((e: TransitionEvent) => void) | null} */
@@ -49,29 +56,49 @@ class App {
     this.#config = new ConfigManager()
     this.#r2 = new R2Client()
     this.#ui = new UIManager()
+    this.#details = new FileDetails({
+      onPreview: (item) => this.#openPreview(item),
+      onNavigate: (key) => void this.#explorer?.navigate(key),
+      onDownload: (key) => void this.#ops?.download(key),
+      onCopy: (key) => void this.#ops?.copyAs(key, 'path'),
+    })
+    this.#wall = new PosterWall(this.#r2, {
+      onPreview: (item) => this.#openPreview({
+        key: item.key, size: item.size ?? 0, lastModified: Number(item.lastModified ?? 0),
+      }),
+      onLoadMore: async () => { await this.#explorer?.loadMore() },
+      onClose: () => {
+        $('#view-wall-btn').setAttribute('aria-pressed', 'false')
+        this.#explorer?.suspendThumbnails(false)
+        if (!$('#app').hidden) $('#view-wall-btn').focus({ preventScroll: true })
+      },
+    })
 
     this.#ui.initTheme()
     this.#ui.initTooltip()
 
     const urlParams = new URLSearchParams(window.location.search)
     const configParam = urlParams.get('config')
-    if (configParam) {
-      if (this.#config.loadFromBase64(configParam)) {
-        const cleanUrl = new URL(window.location.href)
-        cleanUrl.searchParams.delete('config')
-        window.history.replaceState({}, '', cleanUrl.toString())
-        const lang = localStorage.getItem(LANG_KEY)
-        if (lang) setLang(/** @type {Lang} */ (lang))
-        const theme = localStorage.getItem(THEME_KEY)
-        if (theme) this.#ui.setTheme(theme)
-      }
+    // Remove shared payloads from the address bar even if malformed. Legacy
+    // links may have contained secrets; do not retain them in the active URL.
+    if (configParam !== null) {
+      const cleanUrl = new URL(window.location.href)
+      cleanUrl.searchParams.delete('config')
+      window.history.replaceState({}, '', cleanUrl.toString())
+    }
+    const importedConfig = Boolean(configParam) && this.#config.loadFromBase64(configParam)
+    if (importedConfig) {
+      const lang = localStorage.getItem(LANG_KEY)
+      if (lang) setLang(/** @type {Lang} */ (lang))
+      const theme = localStorage.getItem(THEME_KEY)
+      if (theme) this.#ui.setTheme(theme)
     }
 
     this.#applyI18nToHTML()
 
     if (this.#config.isValid()) {
       this.#connectAndLoad()
-      if (configParam) {
+      if (importedConfig) {
         setTimeout(() => this.#ui.toast(t('configLoadedFromUrl'), 'success'), 500)
       }
     } else {
@@ -126,6 +153,17 @@ class App {
     $('#lbl-language').textContent = t('lblLanguage')
 
     $('#lbl-density').textContent = t('lblDensity')
+    $('#lbl-thumbnail-mode').textContent = t('thumbnailModeLabel')
+    $('#thumbnail-mode-hint').textContent = t('thumbnailHint')
+    for (const [mode, key] of [
+      ['auto', 'thumbnailAuto'],
+      ['strict', 'thumbnailStrict'],
+      ['original', 'thumbnailOriginal'],
+    ]) {
+      const option = /** @type {HTMLOptionElement | null} */ (document.querySelector(`#cfg-thumbnail-mode option[value="${mode}"]`))
+      if (option) option.textContent = t(/** @type {any} */ (key))
+    }
+    this.#updateThumbnailModeIndicator()
     const densitySelect = $('#cfg-density')
     if (densitySelect) {
       $('option[value="compact"]', densitySelect).textContent = t('densityCompact')
@@ -235,6 +273,7 @@ class App {
     )
     $('#upload-panel-progress').setAttribute('aria-label', t('uploadOverallProgress'))
     $('#load-more-btn').textContent = t('loadMore')
+    $('#load-more-hint').textContent = t('loadMoreHint')
     const filterInput = /** @type {HTMLInputElement} */ ($('#file-filter-input'))
     filterInput.placeholder = t('filterPlaceholder')
     filterInput.setAttribute('aria-label', t('filterPlaceholder'))
@@ -313,13 +352,43 @@ class App {
       if (label) button.setAttribute('aria-label', label)
     })
 
+    $('#view-gallery-btn').dataset.tooltip = t('viewGallery')
+    $('#view-gallery-btn').setAttribute('aria-label', t('viewGallery'))
+    $('#view-wall-btn').dataset.tooltip = t('viewWall')
+    $('#view-wall-btn').setAttribute('aria-label', t('viewWall'))
+    this.#details.updateLabels()
+    this.#wall.refreshLabels()
     this.#ui.initTooltip()
+  }
+
+  #updateThumbnailModeIndicator() {
+    const indicator = $('#thumbnail-mode-indicator')
+    const mode = getThumbnailMode()
+    const cfg = this.#config.get()
+    const publicDomain = cfg.bucketAccess !== 'private' && Boolean(cfg.customDomain)
+    indicator.hidden = false
+    indicator.textContent =
+      mode === 'original'
+        ? t('thumbnailIndicatorOriginal')
+        : mode === 'strict'
+          ? t('thumbnailIndicatorStrict')
+          : publicDomain
+            ? t('thumbnailIndicatorCDN')
+            : t('thumbnailIndicatorPrivate')
+    indicator.title = t('thumbnailHint')
   }
 
   async #connectAndLoad() {
     try {
+      this.#wall.close()
       this.#r2.init(this.#config)
+      this.#updateThumbnailModeIndicator()
       this.#explorer = new FileExplorer(this.#r2, this.#ui)
+      this.#explorer.setOnDirectoryChange(() => {
+        this.#details.close()
+        this.#wall.close()
+      })
+      this.#explorer.setOnItemsChange((items, hasMore) => this.#wall.update(items, hasMore))
       this.#upload = new UploadManager(this.#r2, this.#ui, this.#explorer, this.#config)
       this.#preview = new FilePreview(this.#r2, this.#ui)
       this.#ops = new FileOperations(this.#r2, this.#ui, this.#explorer)
@@ -410,10 +479,28 @@ class App {
 
   /** @param {string} view */
   #setView(view) {
-    $('#file-browser').dataset.view = view
-    $('#view-grid-btn').setAttribute('aria-pressed', String(view === 'grid'))
-    $('#view-list-btn').setAttribute('aria-pressed', String(view === 'list'))
-    localStorage.setItem(VIEW_KEY, view)
+    if (view === 'wall') {
+      this.#openWall()
+      return
+    }
+    if (this.#wall.isOpen) this.#wall.close()
+    const next = ['grid', 'list', 'gallery'].includes(view) ? view : 'grid'
+    const previous = $('#file-browser').dataset.view
+    $('#file-browser').dataset.view = next
+    $('#view-grid-btn').setAttribute('aria-pressed', String(next === 'grid'))
+    $('#view-list-btn').setAttribute('aria-pressed', String(next === 'list'))
+    $('#view-gallery-btn').setAttribute('aria-pressed', String(next === 'gallery'))
+    if (previous !== next) this.#explorer?.refreshThumbnails()
+    localStorage.setItem(VIEW_KEY, next)
+  }
+
+  #openWall() {
+    if (!this.#explorer) return
+    this.#details.close()
+    if (this.#batchMode) this.#exitBatchMode()
+    this.#explorer.suspendThumbnails(true)
+    this.#wall.open(this.#explorer.getWallItems(), this.#explorer.hasMore)
+    $('#view-wall-btn').setAttribute('aria-pressed', 'true')
   }
 
   /** @param {string} density */
@@ -507,6 +594,7 @@ class App {
     const themeInput = /** @type {HTMLSelectElement | null} */ ($('#cfg-theme'))
     const languageInput = /** @type {HTMLSelectElement | null} */ ($('#cfg-language'))
     const densityInput = /** @type {HTMLSelectElement | null} */ ($('#cfg-density'))
+    const thumbnailModeInput = /** @type {HTMLSelectElement} */ ($('#cfg-thumbnail-mode'))
 
     const cfg = this.#config.get()
     const accountInput = /** @type {HTMLInputElement} */ ($('#cfg-account-id'))
@@ -530,6 +618,7 @@ class App {
     if (themeInput) themeInput.value = currentTheme
     if (languageInput) languageInput.value = savedLang
     if (densityInput) densityInput.value = currentDensityValue
+    thumbnailModeInput.value = getThumbnailMode()
 
     if (cfg.accountId) accountInput.value = cfg.accountId
     if (cfg.accessKeyId) accessInput.value = cfg.accessKeyId
@@ -594,6 +683,9 @@ class App {
         this.#setDensity(newDensity)
       }
 
+      const newThumbnailMode = /** @type {'auto' | 'strict' | 'original'} */ (thumbnailModeInput.value)
+      if (newThumbnailMode !== getThumbnailMode()) setThumbnailMode(newThumbnailMode)
+
       this.#config.save({
         accountId: accountInput.value.trim(),
         accessKeyId: accessInput.value.trim(),
@@ -628,6 +720,8 @@ class App {
       const ok = await this.#ui.confirm(t('logoutConfirmTitle'), t('logoutConfirmMsg'))
       if (!ok) return
       this.#config.clear()
+      this.#wall.close()
+      this.#details.close()
       $('#app').hidden = true
       this.#showHero()
     })
@@ -679,6 +773,7 @@ class App {
   #bindAppEvents() {
     const filterInput = /** @type {HTMLInputElement} */ ($('#file-filter-input'))
     const clearFilter = () => {
+      this.#details.close()
       filterInput.value = ''
       $('#file-filter-clear').hidden = true
       this.#explorer?.setFilterQuery('')
@@ -687,6 +782,7 @@ class App {
     }
 
     filterInput.addEventListener('input', () => {
+      this.#details.close()
       $('#file-filter-clear').hidden = filterInput.value.length === 0
       this.#explorer?.setFilterQuery(filterInput.value)
       this.#updateSelectAllBtn()
@@ -723,6 +819,13 @@ class App {
 
     $('#file-grid').addEventListener('click', (e) => {
       const target = /** @type {HTMLElement} */ (e.target)
+      const detailsButton = /** @type {HTMLElement | null} */ (target.closest('.file-card-details'))
+      if (detailsButton) {
+        e.stopPropagation()
+        const card = /** @type {HTMLElement | null} */ (detailsButton.closest('.file-card'))
+        if (card) this.#details.open(card)
+        return
+      }
       const menuBtn = /** @type {HTMLElement | null} */ (target.closest('.file-card-menu'))
       if (menuBtn) {
         e.stopPropagation()
@@ -916,6 +1019,8 @@ class App {
 
     $('#view-grid-btn').addEventListener('click', () => this.#setView('grid'))
     $('#view-list-btn').addEventListener('click', () => this.#setView('list'))
+    $('#view-gallery-btn').addEventListener('click', () => this.#setView('gallery'))
+    $('#view-wall-btn').addEventListener('click', () => this.#setView('wall'))
 
     $('#batch-delete-btn').addEventListener('click', async () => {
       const items = /** @type {FileExplorer} */ (this.#explorer).getSelection()

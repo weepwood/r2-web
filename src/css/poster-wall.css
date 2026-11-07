@@ -1,0 +1,351 @@
+/*
+ * PosterWall · quiet image-led UI
+ * Design premise: imagery supplies color, chrome disappears into the edges.
+ * No card framing, no glass panels, no continuous attention-seeking motion.
+ */
+.poster-wall {
+  --wall-bg: #070707;
+  --wall-ink: #f7f4ee;
+  --wall-muted: rgb(247 244 238 / 56%);
+  position: fixed;
+  inset: 0;
+  z-index: 800;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--wall-bg);
+  color: var(--wall-ink);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Author-level display rules must not override the HTML hidden attribute. */
+.poster-wall[hidden],
+.poster-wall [hidden] {
+  display: none !important;
+}
+
+.poster-wall-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+  overscroll-behavior: contain;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+  outline: none;
+}
+.poster-wall-viewport.is-dragging { cursor: grabbing; }
+.poster-wall-viewport:focus-visible { outline: 1px solid rgb(247 244 238 / 45%); outline-offset: -3px; }
+
+.poster-wall-canvas {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+  contain: layout style;
+}
+
+.poster-tile {
+  position: absolute;
+  display: block;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: #181818;
+  color: var(--wall-ink);
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  transform-origin: 0 0;
+  box-shadow: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.poster-tile:focus-visible { outline: 2px solid #f7f4ee; outline-offset: -2px; }
+.poster-tile.is-active { box-shadow: 0 0 0 1px rgb(247 244 238 / 28%), 0 10px 32px rgb(0 0 0 / 22%); }
+.poster-tile-media, .poster-tile-shade, .poster-tile-copy { position: absolute; inset: 0; }
+
+.poster-tile-media {
+  display: block;
+  overflow: hidden;
+  background: linear-gradient(135deg, #171717 0%, #202020 52%, #151515 100%);
+}
+.poster-tile-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: cover;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 230ms ease-out, transform 360ms cubic-bezier(.2,.75,.3,1);
+}
+.poster-tile.is-loaded .poster-tile-media img { opacity: 1; }
+/* Upgrade variants load behind the existing photograph; reveal only on success. */
+.poster-tile .poster-tile-media img.poster-tile-upgrade {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+@media (hover:hover) and (pointer:fine) {
+  .poster-tile.is-loaded:hover .poster-tile-media img { transform: scale(1.025); }
+}
+.poster-tile.is-active .poster-tile-media img { transform: scale(1); }
+.poster-tile.is-unavailable .poster-tile-media {
+  background: radial-gradient(ellipse at 40% 30%, #252525, #121212 70%);
+}
+.poster-tile.is-unavailable .poster-tile-media::after {
+  content: '◫';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #494949;
+  font-size: 34px;
+  font-weight: 200;
+}
+
+/* A gentle bottom fade only. It becomes deeper when text is revealed. */
+.poster-tile-shade {
+  pointer-events: none;
+  background: linear-gradient(to top, rgb(0 0 0 / 54%) 0%, rgb(0 0 0 / 13%) 33%, transparent 68%);
+  opacity: .6;
+  transition: opacity 210ms ease;
+}
+.poster-tile-copy {
+  top: auto;
+  z-index: 2;
+  padding: 12px clamp(13px, 1.35vw, 23px) 18px;
+  pointer-events: none;
+  opacity: .9;
+  transform: translateY(0);
+  transition: opacity 200ms ease, transform 250ms cubic-bezier(.2,.7,.3,1);
+}
+.poster-tile-kicker {
+  display: none;
+  margin-bottom: 9px;
+  color: rgb(247 244 238 / 72%);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.poster-tile-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  max-width: 100%;
+  font-size: clamp(18px, 1.55vw, 27px);
+  font-weight: 620;
+  line-height: 1.08;
+  letter-spacing: -.035em;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+  text-shadow: 0 1px 12px rgb(0 0 0 / 43%);
+}
+/* Little squares are pure photographs until hovered, focused or selected. */
+.poster-tile.is-compact .poster-tile-copy {
+  opacity: 0;
+  transform: translateY(9px);
+}
+.poster-tile.is-compact .poster-tile-shade { opacity: 0; }
+.poster-tile:is(:hover, :focus-visible, .is-active) .poster-tile-copy {
+  opacity: 1;
+  transform: translateY(0);
+}
+.poster-tile:is(:hover, :focus-visible, .is-active) .poster-tile-shade { opacity: 1; }
+.poster-tile.is-compact .poster-tile-title { font-size: 19px; }
+.poster-tile.is-active .poster-tile-title { font-size: clamp(27px, 2.7vw, 42px); line-height: 1.04; }
+.poster-tile.is-active .poster-tile-kicker { display: block; }
+.poster-tile.is-active .poster-tile-copy { padding: 18px clamp(18px, 2.2vw, 34px) 30px; }
+
+/* Zoom-aware editorial restraint: overview is an image map, not a label wall. */
+.poster-wall[data-zoom-level='overview'] .poster-tile:not(.is-active):not(:hover):not(:focus-visible) .poster-tile-copy {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.poster-wall[data-zoom-level='overview'] .poster-tile:not(.is-active):not(:hover):not(:focus-visible) .poster-tile-shade {
+  opacity: 0;
+}
+.poster-wall[data-zoom-level='overview'] .poster-tile:is(:hover, :focus-visible, .is-active) .poster-tile-copy,
+.poster-wall[data-zoom-level='overview'] .poster-tile:is(:hover, :focus-visible, .is-active) .poster-tile-shade {
+  opacity: 1;
+}
+
+/* Focus hierarchy: adjacent work remains legible and spatially recognizable. */
+.poster-wall.has-active .poster-tile:not(.is-active) {
+  filter: brightness(.63) saturate(.76);
+  transition: filter 190ms ease;
+}
+.poster-wall.has-active .poster-tile:not(.is-active):is(:hover, :focus-visible) {
+  filter: brightness(.88) saturate(1);
+}
+
+/* Chrome: no giant heading, only a quiet corner label and contextual controls. */
+.poster-wall-header, .poster-wall-hud, .poster-wall-controls,
+.poster-wall-focus-actions, .poster-wall-more {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+}
+.poster-wall-header {
+  top: 25px;
+  left: 29px;
+  max-width: calc(100vw - 110px);
+}
+.poster-wall-eyebrow {
+  color: rgb(247 244 238 / 48%);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .17em;
+}
+.poster-wall-header h2 {
+  margin: 5px 0 0;
+  color: rgb(247 244 238 / 84%);
+  font-size: 16px;
+  font-weight: 520;
+  line-height: 1.2;
+  letter-spacing: -.025em;
+}
+.poster-wall-hud {
+  bottom: 24px;
+  left: 29px;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  color: rgb(247 244 238 / 55%);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+}
+.poster-wall-hud b { color: rgb(247 244 238 / 61%); font-weight: 530; }
+#wall-help {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.poster-wall-controls {
+  top: 21px;
+  right: 25px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.poster-wall-controls-bottom { top: auto; bottom: 20px; }
+.poster-wall-fab {
+  display: grid;
+  place-items: center;
+  width: 39px;
+  height: 39px;
+  border: 1px solid rgb(247 244 238 / 10%);
+  border-radius: 50%;
+  color: rgb(247 244 238 / 78%);
+  background: rgb(15 15 15 / 62%);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  pointer-events: auto;
+  opacity: .65;
+  transition: opacity 160ms ease, background 160ms ease, border-color 160ms ease;
+}
+.poster-wall-fab svg { width: 18px; height: 18px; }
+.poster-wall-fab:is(:hover, :focus-visible) {
+  opacity: 1;
+  color: var(--wall-ink);
+  background: rgb(36 36 36 / 93%);
+  border-color: rgb(247 244 238 / 27%);
+}
+.poster-wall-fab:focus-visible,
+.poster-wall-action:focus-visible { outline: 2px solid #f7f4ee; outline-offset: 3px; }
+.poster-wall-fab:disabled { opacity: .28; cursor: not-allowed; }
+
+/* Inline actions follow the expanded image instead of floating in the center. */
+.poster-wall-focus-actions {
+  top: 0;
+  left: 0;
+  display: flex;
+  gap: 7px;
+  white-space: nowrap;
+  transition: opacity 140ms ease;
+}
+.poster-wall-action {
+  pointer-events: auto;
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1px solid rgb(247 244 238 / 16%);
+  border-radius: 999px;
+  color: rgb(247 244 238 / 88%);
+  background: rgb(19 19 19 / 87%);
+  backdrop-filter: blur(7px);
+  font-size: 11px;
+  font-weight: 570;
+  letter-spacing: .01em;
+  transition: background 150ms ease, border-color 150ms ease;
+}
+.poster-wall-action:is(:hover, :focus-visible) {
+  background: rgb(43 43 43 / 94%);
+  border-color: rgb(247 244 238 / 30%);
+}
+.poster-wall-more { right: 23px; bottom: 79px; }
+.poster-wall-more .poster-wall-action { background: rgb(17 17 17 / 80%); }
+.poster-wall-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  padding: 26px;
+  text-align: center;
+  color: var(--wall-muted);
+  pointer-events: none;
+}
+.poster-wall-empty strong {
+  color: var(--wall-ink);
+  font-size: clamp(21px, 2.5vw, 30px);
+  font-weight: 560;
+  letter-spacing: -.03em;
+}
+.poster-wall-empty span { font-size: 13px; }
+
+@media (hover:none), (pointer:coarse) {
+  .poster-wall-fab { opacity: .88; }
+  .poster-tile.is-compact:not(.is-active):not(:focus-visible) .poster-tile-copy { opacity: 0; transform: none; }
+  .poster-tile.is-compact:not(.is-active):not(:focus-visible) .poster-tile-shade { opacity: 0; }
+  .poster-tile.is-compact .poster-tile-title { font-size: 17px; }
+}
+@media (max-width:640px) {
+  .poster-wall-header { top: 23px; left: 17px; }
+  .poster-wall-header h2 { font-size: 14px; }
+  .poster-wall-eyebrow { font-size: 8px; }
+  .poster-wall-controls { top: 19px; right: 15px; gap: 5px; }
+  .poster-wall-controls-bottom { top: auto; bottom: 18px; }
+  .poster-wall-fab { width: 38px; height: 38px; }
+  .poster-wall-hud { bottom: 26px; left: 17px; font-size: 10px; gap: 7px; }
+  .poster-wall-more { right: 15px; bottom: 73px; }
+  .poster-wall-action { min-height: 37px; padding: 0 13px; }
+  .poster-tile.is-active .poster-tile-title { font-size: 28px; }
+  .poster-tile-copy { padding: 12px 16px 15px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .poster-wall *,
+  .poster-wall *::before,
+  .poster-wall *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,161 @@
+/*
+ * R2 Web · quiet workspace polish
+ * A small set of deliberate overrides, separate from the broad refinements
+ * stylesheet. Photography and filenames stay in front of decorative chrome.
+ */
+
+/* One quiet row instead of a collection of individually raised control cards. */
+#app .toolbar {
+  min-height: 62px;
+  gap: 10px 16px;
+  padding: 9px clamp(16px, 2vw, 28px);
+  border-bottom: 1px solid var(--border-subtle);
+}
+#app .toolbar-location .breadcrumb-btn { font-weight: 520; }
+#app .toolbar-location .breadcrumb li:last-child .breadcrumb-btn {
+  background: transparent;
+  font-weight: 650;
+}
+#app #item-count:not([hidden]) {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-tertiary);
+  padding-inline: 5px;
+  font-variant-numeric: tabular-nums;
+}
+#app .toolbar-controls > .btn-group {
+  border-color: var(--border-subtle);
+  background: var(--bg-secondary);
+  border-radius: 11px;
+  box-shadow: none;
+}
+#app .toolbar-controls .btn-group > .icon-btn {
+  border-radius: 9px;
+  color: var(--text-secondary);
+}
+#app .toolbar-controls .btn-group > .icon-btn[aria-pressed='true'] {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 5%);
+}
+#app .toolbar-controls .btn-group > .icon-btn:is(:hover, :focus-visible) {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+#app .toolbar-controls .icon-btn,
+#app .file-card-actions .icon-btn {
+  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+/* File browsing retains clarity, but cards stop hovering like oversized buttons. */
+#app .file-card {
+  box-shadow: 0 1px 3px rgb(0 0 0 / 2%);
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+}
+#app .file-card:hover {
+  transform: none;
+  border-color: var(--border);
+  box-shadow: 0 3px 12px rgb(0 0 0 / 5%);
+}
+#app .file-card:active { transform: none; }
+#app .file-card-thumb { border-color: transparent; }
+#app .file-card-actions .icon-btn {
+  box-shadow: none;
+  border: 1px solid var(--border-subtle);
+}
+
+/* Gallery view should read like a photograph shelf, not a dashboard of cards. */
+#app .file-browser[data-view='gallery'] .file-grid { gap: 16px 13px; }
+#app .file-browser[data-view='gallery'] .file-card {
+  min-height: 0;
+  gap: 6px;
+  padding: 5px 5px 11px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  box-shadow: none;
+}
+#app .file-browser[data-view='gallery'] .file-card:hover {
+  transform: none;
+  background: var(--bg-primary);
+  border-color: var(--border-subtle);
+  box-shadow: none;
+}
+#app .file-browser[data-view='gallery'] .file-card.selected {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+}
+#app .file-browser[data-view='gallery'] .file-card-thumb,
+#app .file-browser[data-view='gallery'] .file-card-icon {
+  border-radius: 5px;
+  box-shadow: none;
+}
+#app .file-browser[data-view='gallery'] .file-card-name {
+  padding: 5px 4px 0;
+  font-size: 12px;
+  font-weight: 580;
+  line-height: 1.4;
+  letter-spacing: -.008em;
+}
+#app .file-browser[data-view='gallery'] .file-card-size {
+  padding-inline: 4px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+#app .file-browser[data-view='gallery'] .file-card-actions { top: 11px; right: 11px; }
+#app .file-browser[data-view='gallery'] .file-card-actions .icon-btn {
+  border-color: color-mix(in srgb, var(--border) 40%, transparent);
+  border-radius: 8px;
+  box-shadow: none;
+}
+@media (hover:hover) and (pointer:fine) {
+  #app .file-browser[data-view='gallery'] .file-card-actions {
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+  #app .file-browser[data-view='gallery'] .file-card:hover .file-card-actions,
+  #app .file-browser[data-view='gallery'] .file-card:focus-within .file-card-actions {
+    opacity: 1;
+  }
+}
+
+/* Inspector is a document-reading surface, not a second hero image. */
+#app .details-panel {
+  flex-basis: 316px;
+  max-width: 316px;
+  box-shadow: none;
+}
+#app .details-header { min-height: 65px; padding: 14px 19px; }
+#app .details-heading h2 { font-size: 15px; font-weight: 630; }
+#app .details-eyebrow { font-size: 9px; font-weight: 580; letter-spacing: .09em; }
+#app .details-content { padding: 18px 19px; }
+#app .details-art {
+  height: 115px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 11px;
+  background: var(--bg-secondary);
+  margin-bottom: 18px;
+}
+#app .details-art svg { width: 38px; height: 38px; }
+#app .details-filename { font-size: 15px; line-height: 1.4; font-weight: 630; }
+#app .details-metadata { margin-top: 19px; }
+#app .details-metadata > div { padding: 11px 0; }
+#app .details-actions { padding: 15px 19px 18px; }
+
+/* Motion exists to explain state changes, never to pull attention away. */
+@media (prefers-reduced-motion: reduce) {
+  #app .file-card,
+  #app .file-card-actions,
+  #app .toolbar-controls .icon-btn {
+    transition: none !important;
+  }
+}
+@media (max-width:640px) {
+  #app .toolbar { padding-inline: 12px; }
+  #app .file-browser[data-view='gallery'] .file-grid { gap: 12px 8px; }
+  #app .file-browser[data-view='gallery'] .file-card { padding: 3px 3px 9px; }
+  #app .details-panel:not([hidden]) {
+    max-width: min(360px, 92vw);
+    width: min(360px, 92vw);
+  }
+}

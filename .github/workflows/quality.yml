@@ -49,3 +49,35 @@ jobs:
           path: typecheck.log
           if-no-files-found: ignore
           retention-days: 3
+
+  browser:
+    name: 浏览器 UI 冒烟测试
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: 安装 Chromium
+        id: chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: stable
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 运行模拟 R2 浏览器交互测试
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: pnpm test:browser

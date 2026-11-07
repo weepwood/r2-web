@@ -1,5 +1,6 @@
 import { filesize } from 'filesize'
 import { IMAGE_RE } from './constants.js'
+import { ImageAssetService } from './image-asset-service.js'
 import { t } from './i18n.js'
 import { R2Client } from './r2-client.js'
 import { UIManager } from './ui-manager.js'
@@ -14,6 +15,8 @@ const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 class FileExplorer {
   /** @type {R2Client} */
   #r2
+  /** @type {ImageAssetService} */
+  #images
   /** @type {UIManager} */
   #ui
   #prefix = ''
@@ -30,12 +33,26 @@ class FileExplorer {
   #selection = new Map()
   /** @type {((count: number) => void) | null} */
   #onSelectionChange = null
+  /** @type {(() => void) | null} */
+  #onDirectoryChange = null
+  /** @type {((items:{key:string,size:number,lastModified:number}[],hasMore:boolean)=>void)|null} */
+  #onItemsChange = null
+  #thumbnailsSuspended = false
   #loadGen = 0
+  #loadingPageGeneration = -1
   #filterQuery = ''
+  #thumbnailRenderGeneration = 0
+  /** @type {{ card: HTMLElement; key: string; generation: number }[]} */
+  #thumbnailQueue = []
+  #activeThumbnailLoads = 0
+  #maxThumbnailLoads = 4
+  /** @type {Set<() => void>} */
+  #thumbnailCancels = new Set()
 
   /** @param {R2Client} r2 @param {UIManager} ui */
   constructor(r2, ui) {
     this.#r2 = r2
+    this.#images = new ImageAssetService(r2)
     this.#ui = ui
 
     this.#thumbnailObserver = new IntersectionObserver(
@@ -43,11 +60,13 @@ class FileExplorer {
         for (const entry of entries) {
           if (entry.isIntersecting) {
             const card = /** @type {HTMLElement} */ (entry.target)
+            if (!card.isConnected || card.hidden) continue
             const key = card.dataset.key ?? ''
             this.#thumbnailObserver.unobserve(card)
-            this.#lazyLoadThumbnail(card, key)
+            this.#thumbnailQueue.push({ card, key, generation: this.#thumbnailRenderGeneration })
           }
         }
+        this.#pumpThumbnailQueue()
       },
       { rootMargin: '120px' },
     )
@@ -68,6 +87,50 @@ class FileExplorer {
   /** @param {(count: number) => void} cb */
   setOnSelectionChange(cb) {
     this.#onSelectionChange = cb
+  }
+
+  /** @param {() => void} cb */
+  setOnDirectoryChange(cb) {
+    this.#onDirectoryChange = cb
+  }
+
+  /**
+   * Only the images already loaded by paginated R2 listing are available to
+   * PosterWall. This never triggers an extra object-listing request.
+   * @returns {{key:string,size:number,lastModified:number}[]}
+   */
+  getWallItems() {
+    return this.#sortItems(this.#loadedItems)
+      .filter((item) => !item.isFolder && IMAGE_RE.test(item.key))
+      .filter((item) => !this.#filterQuery || extractFileName(item.key).toLocaleLowerCase().includes(this.#filterQuery))
+      .map((item) => ({
+        key: item.key,
+        size: item.size ?? 0,
+        lastModified: item.lastModified ? new Date(item.lastModified).getTime() : 0,
+      }))
+  }
+
+  get hasMore() {
+    return Boolean(this.#continuationToken)
+  }
+
+  /** @param {(items:{key:string,size:number,lastModified:number}[],hasMore:boolean)=>void} callback */
+  setOnItemsChange(callback) {
+    this.#onItemsChange = callback
+  }
+
+  /** @param {boolean} paused */
+  suspendThumbnails(paused) {
+    if (paused === this.#thumbnailsSuspended) return
+    this.#thumbnailsSuspended = paused
+    this.#resetThumbnails()
+    if (!paused) {
+      document.querySelectorAll('#file-grid .file-card:not([hidden])').forEach((card) => {
+        if (card.querySelector('.file-card-thumb:not(.loaded)')) {
+          this.#thumbnailObserver.observe(card)
+        }
+      })
+    }
   }
 
   /** @returns {SelectionItem[]} */
@@ -129,7 +192,15 @@ class FileExplorer {
     if (this.#filterQuery === normalized) return
     this.clearSelection()
     this.#filterQuery = normalized
+    // Abort pending images hidden by this filter, then load only visible matches.
+    this.#resetThumbnails()
     this.#applyFilter()
+    document.querySelectorAll('#file-grid .file-card:not([hidden])').forEach((card) => {
+      if (card.querySelector('.file-card-thumb:not(.loaded)')) {
+        card.classList.remove('thumbnail-loading', 'thumbnail-unavailable', 'thumbnail-error')
+        this.#thumbnailObserver.observe(card)
+      }
+    })
   }
 
   #applyFilter() {
@@ -148,8 +219,17 @@ class FileExplorer {
     const countEl = $('#item-count')
     countEl.textContent = isFiltering
       ? t('itemsFiltered', { count: matched, total: this.#loadedItems.length })
-      : t('itemsTotal', { count: this.#loadedItems.length })
+      : this.#continuationToken
+        ? t('itemsPartial', { count: this.#loadedItems.length })
+        : t('itemsTotal', { count: this.#loadedItems.length })
     countEl.hidden = this.#loadedItems.length === 0
+    this.#onItemsChange?.(this.getWallItems(), this.hasMore)
+  }
+
+  /** Re-render only thumbnails when the local user preference changes. */
+  refreshThumbnails() {
+    if (this.#loadedItems.length === 0) return
+    this.#resortAndRender()
   }
 
   /** @param {string} sortBy */
@@ -166,6 +246,7 @@ class FileExplorer {
 
   #resortAndRender() {
     if (this.#loadedItems.length === 0) return
+    this.#resetThumbnails()
     $('#file-grid').innerHTML = ''
     this.#renderItems(this.#sortItems(this.#loadedItems))
     this.#restoreSelectionUI()
@@ -187,6 +268,8 @@ class FileExplorer {
 
   /** @param {string} prefix */
   async navigate(prefix) {
+    this.#onDirectoryChange?.()
+    this.#resetThumbnails()
     this.clearSelection()
     this.#filterQuery = ''
     const searchInput = /** @type {HTMLInputElement | null} */ (document.querySelector('#file-filter-input'))
@@ -208,31 +291,30 @@ class FileExplorer {
     await this.#loadAllPages(false)
   }
 
+  /** Load a single R2 ListObjectsV2 page (maximum PAGE_SIZE objects). */
   /** @param {boolean} isInitial @param {boolean} [bypassCache] */
   async #loadAllPages(isInitial, bypassCache = false) {
     const gen = this.#loadGen
+    if (this.#loadingPageGeneration === gen) return
+    this.#loadingPageGeneration = gen
+    const moreButton = /** @type {HTMLButtonElement} */ ($('#load-more-btn'))
+    moreButton.disabled = true
     if (isInitial) this.#ui.showSkeleton()
     try {
-      do {
-        const cacheKey = `${this.#prefix}::${this.#continuationToken}`
-        const cached = this.#cache.get(cacheKey)
-        let result
-
-        if (!bypassCache && cached && Date.now() - cached.ts < CACHE_TTL) {
-          result = cached.data
-        } else {
-          result = await this.#r2.listObjects(this.#prefix, this.#continuationToken)
-          this.#cache.set(cacheKey, { data: result, ts: Date.now() })
-        }
-
-        if (gen !== this.#loadGen) return
-
-        this.#continuationToken = result.isTruncated ? result.nextToken : ''
-        this.#loadedItems.push(...result.folders, ...result.files)
-      } while (this.#continuationToken)
+      const cacheKey = `${this.#prefix}::${this.#continuationToken}`
+      const cached = this.#cache.get(cacheKey)
+      let result
+      if (!bypassCache && cached && Date.now() - cached.ts < CACHE_TTL) {
+        result = cached.data
+      } else {
+        result = await this.#r2.listObjects(this.#prefix, this.#continuationToken)
+        this.#cache.set(cacheKey, { data: result, ts: Date.now() })
+      }
 
       if (gen !== this.#loadGen) return
 
+      this.#continuationToken = result.isTruncated ? result.nextToken : ''
+      this.#loadedItems.push(...result.folders, ...result.files)
       if (isInitial) this.#ui.hideSkeleton()
 
       const sorted = this.#sortItems(this.#loadedItems)
@@ -240,14 +322,17 @@ class FileExplorer {
         this.#ui.showEmptyState()
       } else {
         this.#ui.hideEmptyState()
-        $('#file-grid').innerHTML = ''
+        // Preserve existing image nodes on Load More so their loaded thumbnails
+        // and in-flight requests survive reordering into the newly sorted list.
         this.#renderItems(sorted)
         this.#restoreSelectionUI()
       }
 
       this.#applyFilter()
-      $('#load-more').hidden = true
+      $('#load-more').hidden = !this.#continuationToken
+      this.#onSelectionChange?.(this.#selection.size)
     } catch (/** @type {any} */ err) {
+      if (gen !== this.#loadGen) return
       if (isInitial) this.#ui.hideSkeleton()
 
       const errorKey = getErrorMessage(err)
@@ -259,6 +344,11 @@ class FileExplorer {
 
       if (err.message === 'HTTP_401' || err.message === 'HTTP_403') {
         throw err
+      }
+    } finally {
+      if (this.#loadingPageGeneration === gen) {
+        this.#loadingPageGeneration = -1
+        moreButton.disabled = false
       }
     }
   }
@@ -304,14 +394,22 @@ class FileExplorer {
   /** @param {FileItem[]} items */
   #renderItems(items) {
     const grid = $('#file-grid')
+    const existingCards = new Map(
+      [...grid.querySelectorAll('.file-card')].map((node) => [
+        /** @type {HTMLElement} */ (node).dataset.key ?? '',
+        node,
+      ]),
+    )
     const frag = document.createDocumentFragment()
 
     for (const item of items) {
-      const card = this.#createFileCard(item)
+      // Reuse the same <img> node where possible rather than re-requesting
+      // thumbnails every time another R2 page becomes available.
+      const card = existingCards.get(item.key) ?? this.#createFileCard(item)
       frag.appendChild(card)
     }
 
-    grid.appendChild(frag)
+    grid.replaceChildren(frag)
   }
 
   /** @param {FileItem} item @returns {HTMLDivElement} */
@@ -320,6 +418,7 @@ class FileExplorer {
     card.className = 'file-card'
     card.dataset.key = item.key
     card.dataset.isFolder = String(item.isFolder)
+    card.dataset.filetype = item.isFolder ? 'folder' : getFileType(item.key)
     if (!item.isFolder) {
       card.dataset.size = String(item.size ?? 0)
       if (item.lastModified) {
@@ -336,7 +435,7 @@ class FileExplorer {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
       </div>`
     } else if (isImage) {
-      iconHtml = `<img class="file-card-thumb" alt="" loading="lazy">`
+      iconHtml = `<img class="file-card-thumb" alt="" loading="lazy" decoding="async">`
     } else {
       const fileType = getFileType(item.key)
       iconHtml = `<div class="file-card-icon ${fileType}">
@@ -360,6 +459,12 @@ class FileExplorer {
           : ''
       }
       <div class="file-card-actions">
+        <button type="button" class="icon-btn sm file-card-details" title="${t('detailsAction')}" aria-label="${t('detailsAction')}">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 11v5M12 8h.01" />
+          </svg>
+        </button>
         <button type="button" class="icon-btn sm file-card-menu" title="More">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
         </button>
@@ -369,24 +474,100 @@ class FileExplorer {
     nameEl.textContent = name
     nameEl.setAttribute('title', name)
 
-    if (isImage) {
+    if (isImage && !this.#thumbnailsSuspended) {
       this.#thumbnailObserver.observe(card)
     }
 
     return card
   }
 
-  /** @param {HTMLElement} card @param {string} key */
-  async #lazyLoadThumbnail(card, key) {
+  #resetThumbnails() {
+    this.#thumbnailRenderGeneration++
+    this.#thumbnailQueue = []
+    this.#thumbnailObserver.disconnect()
+    // Cancel stalled or outdated image requests immediately instead of making
+    // the next directory wait for their 20-second network timeouts.
+    for (const cancel of this.#thumbnailCancels) cancel()
+    this.#thumbnailCancels.clear()
+  }
+
+  #pumpThumbnailQueue() {
+    while (this.#activeThumbnailLoads < this.#maxThumbnailLoads && this.#thumbnailQueue.length) {
+      const task = this.#thumbnailQueue.shift()
+      if (!task || task.generation !== this.#thumbnailRenderGeneration || !task.card.isConnected || task.card.hidden) {
+        continue
+      }
+      this.#activeThumbnailLoads++
+      void this.#lazyLoadThumbnail(task.card, task.key, task.generation).finally(() => {
+        this.#activeThumbnailLoads--
+        this.#pumpThumbnailQueue()
+      })
+    }
+  }
+
+  /**
+   * A bounded queue prevents hundreds of simultaneous original-size downloads.
+   * Only public custom-domain images can use Cloudflare image transformations;
+   * private S3 presigned URLs are never sent through the public transformer.
+   * @param {HTMLElement} card
+   * @param {string} key
+   * @param {number} generation
+   */
+  async #lazyLoadThumbnail(card, key, generation) {
+    const img = /** @type {HTMLImageElement | null} */ (card.querySelector('.file-card-thumb'))
+    if (!img) return
+    const isCurrent = () => generation === this.#thumbnailRenderGeneration && card.isConnected
+    card.classList.add('thumbnail-loading')
+
+    /** @param {string} url @returns {Promise<boolean>} */
+    const load = (url) =>
+      new Promise((resolve) => {
+        if (!isCurrent()) return resolve(false)
+        let resolved = false
+        const cancel = () => finish(false)
+        const timeout = setTimeout(cancel, 20000)
+        /** @param {boolean} ok */
+        const finish = (ok) => {
+          if (resolved) return
+          resolved = true
+          clearTimeout(timeout)
+          this.#thumbnailCancels.delete(cancel)
+          img.onload = null
+          img.onerror = null
+          if (!ok) img.removeAttribute('src')
+          resolve(ok)
+        }
+        this.#thumbnailCancels.add(cancel)
+        img.onload = () => finish(true)
+        img.onerror = () => finish(false)
+        img.src = url
+      })
+
     try {
-      const url = this.#r2.getPublicUrl(key) ?? (await this.#r2.getPresignedUrl(key))
-      const img = /** @type {HTMLImageElement} */ ($('img', card))
-      if (!img) return
-      img.onload = () => img.classList.add('loaded')
-      img.onerror = () => img.classList.add('loaded')
-      img.src = url
+      const browserDpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio
+      const displayWidth = $('#file-browser').dataset.view === 'list' ? 64 : Math.min(card.clientWidth, 260)
+      const policy = this.#images.thumbnailPlan(key, displayWidth, browserDpr)
+
+      if (!policy.url && !policy.allowOriginal) {
+        card.classList.add('thumbnail-unavailable')
+        img.title = t('thumbnailUnavailable')
+        return
+      }
+
+      let loaded = false
+      if (policy.url) loaded = await load(policy.url)
+      if (!loaded && policy.allowOriginal && isCurrent()) {
+        const original = await this.#images.originalUrl(key)
+        if (isCurrent()) loaded = await load(original)
+      }
+
+      if (!isCurrent()) return
+      if (loaded) img.classList.add('loaded')
+      else card.classList.add('thumbnail-error')
     } catch {
-      /* ignore thumbnail failures */
+      if (isCurrent()) card.classList.add('thumbnail-error')
+    } finally {
+      if (isCurrent()) card.classList.remove('thumbnail-loading')
     }
   }
 
@@ -421,6 +602,8 @@ class FileExplorer {
   }
 
   async refresh() {
+    this.#onDirectoryChange?.()
+    this.#resetThumbnails()
     this.clearSelection()
     this.invalidateCache(this.#prefix)
     this.#continuationToken = ''
