@@ -4,7 +4,7 @@ import { extractFileName } from './utils.js'
 import { t } from './i18n.js'
 import { buildWallLayout, cameraBounds, focusBlockReflow, focusReflow, intersects, preserveTileAnchor, zoomAt } from './poster-wall-layout.js'
 import { indexWallTiles, queryWallTiles } from './poster-wall-visibility.js'
-import { classifyWallWheel, focusedWallCamera, stepWheelDamping } from './poster-wall-motion.js'
+import { classifyWallWheel, focusedWallCamera, projectWallCoast, stepWheelDamping } from './poster-wall-motion.js'
 
 /** @typedef {{key:string,size?:number,lastModified?:number|string}} ImageItem */
 /** @typedef {{key:string,node:HTMLButtonElement,img:HTMLImageElement,cancel:()=>void,active:boolean,stopped:boolean,requestedWidth:number}} ImageTask */
@@ -65,7 +65,7 @@ class PosterWall {
   #reducedMotion = false
   #pinchDistance = 0
   #lastPinchCenter = { x: 0, y: 0 }
-  /** @type {Map<number,{x:number,y:number,originX:number,originY:number}>} */
+  /** @type {Map<number,{x:number,y:number,originX:number,originY:number,lastTime:number,vx:number,vy:number}>} */
   #pointers = new Map()
   /** @type {string|null} */
   #pointerTile = null
@@ -94,6 +94,7 @@ class PosterWall {
       this.#reducedMotion = event.matches
       if (event.matches) {
         this.#cancelCameraMotion()
+        this.#cancelWheelMotion()
         for (const tile of this.#nodes.values()) tile.getAnimations().forEach((animation) => animation.cancel())
       }
     })
@@ -906,6 +907,7 @@ class PosterWall {
     this.#pointers.set(event.pointerId, {
       x: event.clientX, y: event.clientY,
       originX: event.clientX, originY: event.clientY,
+      lastTime: event.timeStamp, vx: 0, vy: 0,
     })
     // A second finger is a new gesture; do not allow either contact to
     // synthesize a tile click when it leaves the screen.
@@ -941,6 +943,12 @@ class PosterWall {
     if (!pointer) return
     const dx = event.clientX - pointer.x
     const dy = event.clientY - pointer.y
+    const elapsed = event.timeStamp - pointer.lastTime
+    if (elapsed > 0 && elapsed < 130) {
+      pointer.vx = pointer.vx * .25 + dx / elapsed * 1000 * .75
+      pointer.vy = pointer.vy * .25 + dy / elapsed * 1000 * .75
+    } else { pointer.vx = 0; pointer.vy = 0 }
+    pointer.lastTime = event.timeStamp
     pointer.x = event.clientX
     pointer.y = event.clientY
     const totalX = pointer.x - pointer.originX
@@ -984,6 +992,10 @@ class PosterWall {
     if (!pointer) return
     const pick = !this.#dragged && !this.#gestureUsedPinch &&
       this.#pointers.size === 1 ? this.#pointerTile : null
+    const coast = this.#dragged && !this.#gestureUsedPinch && !this.#reducedMotion &&
+      this.#pointers.size === 1 && event.type === 'pointerup'
+      ? projectWallCoast(pointer.vx, pointer.vy, event.timeStamp - pointer.lastTime)
+      : null
     this.#pointers.delete(event.pointerId)
     if (this.#pointers.size < 2) {
       this.#pinchDistance = 0
@@ -1001,6 +1013,13 @@ class PosterWall {
       this.#gestureUsedPinch = false
     }
     if (pick && event.type === 'pointerup') this.#toggle(pick)
+    else if (coast && this.isOpen) {
+      this.#animateCamera({
+        x: this.#camera.x + coast.x,
+        y: this.#camera.y + coast.y,
+        scale: this.#camera.scale,
+      }, 330)
+    }
   }
 
   /** @param {KeyboardEvent} event */
