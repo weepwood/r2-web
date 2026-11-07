@@ -16,7 +16,7 @@ export const WALL_MOTIFS = Object.freeze([
 ])
 
 /** @typedef {{key:string, size?:number, lastModified?:number|string}} WallItem */
-/** @typedef {WallItem & {x:number,y:number,w:number,h:number}} WallTile */
+/** @typedef {WallItem & {x:number,y:number,w:number,h:number,blockIndex:number}} WallTile */
 
 /**
  * @param {WallItem[]} items
@@ -203,6 +203,7 @@ export function focusReflow(layout, activeKey) {
     {x:0,y:fy+focusH,w:6,h:4-fy-focusH},
   ].filter((zone)=>zone.w>0 && zone.h>0)
 
+  /** @param {CellRect} rect */
   const absolute = (rect) => ({
     x:originX+rect.x*stride,y:originY+rect.y*stride,
     w:rect.w*stride-WALL_GAP,h:rect.h*stride-WALL_GAP,
@@ -211,7 +212,12 @@ export function focusReflow(layout, activeKey) {
 
   // Assign the remaining tiles to the nearest available rectangular slot.
   // A block holds only seven or eight tiles; no global neighbor search.
-  const slots = partitionZones(zones,neighbors.length)
+  // The final block may contain fewer images than geometric zones.
+  // Leave unused areas empty rather than inventing duplicate image tiles.
+  const occupiedZones = neighbors.length < zones.length
+    ? [...zones].sort((a,b)=>b.w*b.h-a.w*a.h).slice(0,neighbors.length)
+    : zones
+  const slots = neighbors.length ? partitionZones(occupiedZones,neighbors.length) : []
   const remaining = [...slots]
   for(const tile of neighbors) {
     const original = {
