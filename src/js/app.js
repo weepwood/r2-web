@@ -622,14 +622,14 @@ class App {
     const clearFilter = () => {
       filterInput.value = ''
       $('#file-filter-clear').hidden = true
-      /** @type {FileExplorer} */ (this.#explorer).setFilterQuery('')
+      this.#explorer?.setFilterQuery('')
       this.#updateSelectAllBtn()
       filterInput.focus()
     }
 
     filterInput.addEventListener('input', () => {
       $('#file-filter-clear').hidden = filterInput.value.length === 0
-      /** @type {FileExplorer} */ (this.#explorer).setFilterQuery(filterInput.value)
+      this.#explorer?.setFilterQuery(filterInput.value)
       this.#updateSelectAllBtn()
     })
     $('#file-filter-clear').addEventListener('click', clearFilter)
