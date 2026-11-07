@@ -2,7 +2,7 @@ import { selectThumbnailWidth } from './thumbnail-utils.js'
 import { ImageAssetService } from './image-asset-service.js'
 import { extractFileName } from './utils.js'
 import { t } from './i18n.js'
-import { buildWallLayout, cameraBounds, focusReflow, intersects, preserveTileAnchor, zoomAt } from './poster-wall-layout.js'
+import { buildWallLayout, cameraBounds, focusBlockReflow, focusReflow, intersects, preserveTileAnchor, zoomAt } from './poster-wall-layout.js'
 import { indexWallTiles, queryWallTiles } from './poster-wall-visibility.js'
 
 /** @typedef {{key:string,size?:number,lastModified?:number|string}} ImageItem */
@@ -31,6 +31,8 @@ class PosterWall {
   #layout = []
   /** @type {Map<string,import('./poster-wall-layout.js').WallTile>} */
   #tileByKey = new Map()
+  /** @type {Map<number,import('./poster-wall-layout.js').WallTile[]>} */
+  #blockTiles = new Map()
   /** @type {ReturnType<typeof focusReflow>} */
   #positions = new Map()
   /** @type {ReturnType<typeof indexWallTiles>} */
@@ -230,6 +232,12 @@ class PosterWall {
   #recalculate() {
     this.#layout = buildWallLayout(this.#items, { columns: this.#columnCount })
     this.#tileByKey = new Map(this.#layout.map((tile) => [tile.key, tile]))
+    this.#blockTiles.clear()
+    for (const tile of this.#layout) {
+      const list = this.#blockTiles.get(tile.blockIndex) || []
+      list.push(tile)
+      this.#blockTiles.set(tile.blockIndex, list)
+    }
     this.#blocks = indexWallTiles(this.#layout)
     this.#positions = focusReflow(this.#layout, this.#activeKey)
   }
@@ -550,7 +558,20 @@ class PosterWall {
     // not every image on the wall.
     const previous = this.#getVisualRects(blocks)
     this.#activeKey = this.#activeKey === key ? null : key
-    this.#positions = focusReflow(this.#layout, this.#activeKey)
+    // Restore the previously expanded block and update only the new one.
+    // The layout map is reused; a large Bucket never needs a full clone here.
+    for (const block of blocks) {
+      const tiles = this.#blockTiles.get(block) || []
+      for (const tile of tiles) {
+        this.#positions.set(tile.key, { x:tile.x, y:tile.y, w:tile.w, h:tile.h })
+      }
+    }
+    if (this.#activeKey && newBlock !== undefined) {
+      const tiles = this.#blockTiles.get(newBlock) || []
+      for (const [itemKey, rect] of focusBlockReflow(tiles, this.#activeKey)) {
+        this.#positions.set(itemKey, rect)
+      }
+    }
     this.#render(previous)
 
     // Folia-like focus: the expanded picture settles towards the center
