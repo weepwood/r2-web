@@ -38,6 +38,8 @@ class FileExplorer {
   #thumbnailQueue = []
   #activeThumbnailLoads = 0
   #maxThumbnailLoads = 4
+  /** @type {Set<() => void>} */
+  #thumbnailCancels = new Set()
 
   /** @param {R2Client} r2 @param {UIManager} ui */
   constructor(r2, ui) {
@@ -137,7 +139,15 @@ class FileExplorer {
     if (this.#filterQuery === normalized) return
     this.clearSelection()
     this.#filterQuery = normalized
+    // Abort pending images hidden by this filter, then load only visible matches.
+    this.#resetThumbnails()
     this.#applyFilter()
+    document.querySelectorAll('#file-grid .file-card:not([hidden])').forEach((card) => {
+      if (card.querySelector('.file-card-thumb:not(.loaded)')) {
+        card.classList.remove('thumbnail-loading', 'thumbnail-unavailable', 'thumbnail-error')
+        this.#thumbnailObserver.observe(card)
+      }
+    })
   }
 
   #applyFilter() {
@@ -396,6 +406,10 @@ class FileExplorer {
     this.#thumbnailRenderGeneration++
     this.#thumbnailQueue = []
     this.#thumbnailObserver.disconnect()
+    // Cancel stalled or outdated image requests immediately instead of making
+    // the next directory wait for their 20-second network timeouts.
+    for (const cancel of this.#thumbnailCancels) cancel()
+    this.#thumbnailCancels.clear()
   }
 
   #pumpThumbnailQueue() {
@@ -431,17 +445,20 @@ class FileExplorer {
       new Promise((resolve) => {
         if (!isCurrent()) return resolve(false)
         let resolved = false
-        const timeout = setTimeout(() => finish(false), 20000)
+        const cancel = () => finish(false)
+        const timeout = setTimeout(cancel, 20000)
         /** @param {boolean} ok */
         const finish = (ok) => {
           if (resolved) return
           resolved = true
           clearTimeout(timeout)
+          this.#thumbnailCancels.delete(cancel)
           img.onload = null
           img.onerror = null
-          if (!ok && isCurrent()) img.removeAttribute('src')
+          if (!ok) img.removeAttribute('src')
           resolve(ok)
         }
+        this.#thumbnailCancels.add(cancel)
         img.onload = () => finish(true)
         img.onerror = () => finish(false)
         img.src = url
