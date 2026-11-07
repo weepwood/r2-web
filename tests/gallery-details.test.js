@@ -39,7 +39,7 @@ test('inspector closes on navigation, refresh, filtering and logout', () => {
   assert.match(explorer, /setOnDirectoryChange\(cb\)/)
   assert.match(explorer, /async navigate\(prefix\) \{\s*this\.#onDirectoryChange\?\.\(\)/)
   assert.match(explorer, /async refresh\(\) \{\s*this\.#onDirectoryChange\?\.\(\)/)
-  assert.match(app, /setOnDirectoryChange\(\(\) => this\.#details\.close\(\)\)/)
+  assert.match(app, /setOnDirectoryChange\(\(\) => \{[\s\S]*?this\.#details\.close\(\)[\s\S]*?this\.#wall\.close\(\)/)
   assert.match(app, /filterInput\.addEventListener\('input', \(\) => \{\s*this\.#details\.close\(\)/)
   assert.match(app, /this\.#config\.clear\(\)\s*this\.#details\.close\(\)/)
   assert.match(details, /document\.querySelector\('dialog\[open\]'\)/)
