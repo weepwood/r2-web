@@ -188,6 +188,17 @@ try {
       document.querySelectorAll('.poster-tile').length > 0)`
   ), 'PosterWall opening')
 
+  // The HTML hidden property alone is insufficient: display:flex/grid rules
+  // must not accidentally reveal controls that are meant to be invisible.
+  const visibility = await cdp.evaluate(`(() => {
+    const hiddenIds = ['wall-focus-actions', 'wall-more', 'wall-empty']
+    return hiddenIds.every((id) => {
+      const node = document.getElementById(id)
+      return node.hidden && getComputedStyle(node).display === 'none'
+    })
+  })()`)
+  assert.equal(visibility, true, 'contextual controls and empty state must be visually hidden')
+
   const before = await cdp.evaluate(`document.querySelector('#poster-wall-canvas').style.transform`)
   await cdp.evaluate(`document.querySelector('#wall-zoom-in').click()`)
   await eventually(async () => {
@@ -197,7 +208,8 @@ try {
   await cdp.evaluate(`document.querySelector('.poster-tile').click()`)
   await eventually(() => cdp.evaluate(
     `Boolean(document.querySelector('.poster-tile.is-active') &&
-      !document.querySelector('#wall-focus-actions').hidden)`
+      !document.querySelector('#wall-focus-actions').hidden &&
+      getComputedStyle(document.querySelector('#wall-focus-actions')).display !== 'none')`
   ), 'expanded poster tile')
 
   await cdp.evaluate(`document.querySelector('#wall-preview').click()`)
