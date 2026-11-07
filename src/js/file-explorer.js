@@ -32,6 +32,7 @@ class FileExplorer {
   /** @type {((count: number) => void) | null} */
   #onSelectionChange = null
   #loadGen = 0
+  #loadingPageGeneration = -1
   #filterQuery = ''
   #thumbnailRenderGeneration = 0
   /** @type {{ card: HTMLElement; key: string; generation: number }[]} */
@@ -166,7 +167,9 @@ class FileExplorer {
     const countEl = $('#item-count')
     countEl.textContent = isFiltering
       ? t('itemsFiltered', { count: matched, total: this.#loadedItems.length })
-      : t('itemsTotal', { count: this.#loadedItems.length })
+      : this.#continuationToken
+        ? t('itemsPartial', { count: this.#loadedItems.length })
+        : t('itemsTotal', { count: this.#loadedItems.length })
     countEl.hidden = this.#loadedItems.length === 0
   }
 
@@ -234,31 +237,30 @@ class FileExplorer {
     await this.#loadAllPages(false)
   }
 
+  /** Load a single R2 ListObjectsV2 page (maximum PAGE_SIZE objects). */
   /** @param {boolean} isInitial @param {boolean} [bypassCache] */
   async #loadAllPages(isInitial, bypassCache = false) {
     const gen = this.#loadGen
+    if (this.#loadingPageGeneration === gen) return
+    this.#loadingPageGeneration = gen
+    const moreButton = /** @type {HTMLButtonElement} */ ($('#load-more-btn'))
+    moreButton.disabled = true
     if (isInitial) this.#ui.showSkeleton()
     try {
-      do {
-        const cacheKey = `${this.#prefix}::${this.#continuationToken}`
-        const cached = this.#cache.get(cacheKey)
-        let result
-
-        if (!bypassCache && cached && Date.now() - cached.ts < CACHE_TTL) {
-          result = cached.data
-        } else {
-          result = await this.#r2.listObjects(this.#prefix, this.#continuationToken)
-          this.#cache.set(cacheKey, { data: result, ts: Date.now() })
-        }
-
-        if (gen !== this.#loadGen) return
-
-        this.#continuationToken = result.isTruncated ? result.nextToken : ''
-        this.#loadedItems.push(...result.folders, ...result.files)
-      } while (this.#continuationToken)
+      const cacheKey = `${this.#prefix}::${this.#continuationToken}`
+      const cached = this.#cache.get(cacheKey)
+      let result
+      if (!bypassCache && cached && Date.now() - cached.ts < CACHE_TTL) {
+        result = cached.data
+      } else {
+        result = await this.#r2.listObjects(this.#prefix, this.#continuationToken)
+        this.#cache.set(cacheKey, { data: result, ts: Date.now() })
+      }
 
       if (gen !== this.#loadGen) return
 
+      this.#continuationToken = result.isTruncated ? result.nextToken : ''
+      this.#loadedItems.push(...result.folders, ...result.files)
       if (isInitial) this.#ui.hideSkeleton()
 
       const sorted = this.#sortItems(this.#loadedItems)
@@ -266,14 +268,17 @@ class FileExplorer {
         this.#ui.showEmptyState()
       } else {
         this.#ui.hideEmptyState()
+        this.#resetThumbnails()
         $('#file-grid').innerHTML = ''
         this.#renderItems(sorted)
         this.#restoreSelectionUI()
       }
 
       this.#applyFilter()
-      $('#load-more').hidden = true
+      $('#load-more').hidden = !this.#continuationToken
+      this.#onSelectionChange?.(this.#selection.size)
     } catch (/** @type {any} */ err) {
+      if (gen !== this.#loadGen) return
       if (isInitial) this.#ui.hideSkeleton()
 
       const errorKey = getErrorMessage(err)
@@ -285,6 +290,11 @@ class FileExplorer {
 
       if (err.message === 'HTTP_401' || err.message === 'HTTP_403') {
         throw err
+      }
+    } finally {
+      if (this.#loadingPageGeneration === gen) {
+        this.#loadingPageGeneration = -1
+        moreButton.disabled = false
       }
     }
   }
