@@ -109,13 +109,14 @@ class PosterWall {
     const previousRects = this.#getVisualRects()
     const centerX = (width / 2 - this.#camera.x) / this.#camera.scale
     const centerY = (height / 2 - this.#camera.y) / this.#camera.scale
+    /** @param {{x:number,y:number,w:number,h:number}} rect */
+    const distance = (rect) => (rect.x + rect.w / 2 - centerX) ** 2 +
+      (rect.y + rect.h / 2 - centerY) ** 2
     const anchor = this.#activeKey ?? this.#layout.reduce((best, tile) => {
       const rect = this.#positions.get(tile.key)
       const closest = best ? this.#positions.get(best) : null
       if (!rect) return best
       if (!closest) return tile.key
-      const distance = (r) => (r.x + r.w / 2 - centerX) ** 2 +
-        (r.y + r.h / 2 - centerY) ** 2
       return distance(rect) < distance(closest) ? tile.key : best
     }, /** @type {string | null} */ (null))
     const before = anchor ? this.#positions.get(anchor) : null
