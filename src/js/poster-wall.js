@@ -49,6 +49,7 @@ class PosterWall {
   /** @type {string|null} */
   #pointerTile = null
   #dragged = false
+  #gestureUsedPinch = false
   #columnCount = 3
   /** @type {Map<HTMLElement,boolean>} */
   #backgroundInert = new Map()
@@ -133,6 +134,10 @@ class PosterWall {
     this.#renderFrame = 0
     this.#cancelCameraMotion()
     this.#pointers.clear()
+    this.#gestureUsedPinch = false
+    this.#pointerTile = null
+    this.#dragged = false
+    this.#viewport.classList.remove('is-dragging')
     this.#activeKey = null
     this.#pinchDistance = 0
     this.#cancelAllImages()
@@ -175,10 +180,23 @@ class PosterWall {
   resetCamera(animated = false) {
     const width = this.#viewport.clientWidth || window.innerWidth
     const height = this.#viewport.clientHeight || window.innerHeight
-    const scale = width < 640 ? 0.54 : width < 1100 ? 0.66 : 0.76
+    const defaultScale = width < 640 ? 0.54 : width < 1100 ? 0.66 : 0.76
+    // Fit the first motif rather than assuming there are always many images.
+    // A one-image folder now opens centered instead of against empty canvas.
+    const opening = this.#layout.slice(0, Math.min(this.#layout.length, 7))
+    const left = opening.length ? Math.min(...opening.map((tile) => tile.x)) : 0
+    const top = opening.length ? Math.min(...opening.map((tile) => tile.y)) : 0
+    const right = opening.length ? Math.max(...opening.map((tile) => tile.x + tile.w)) : 0
+    const bottom = opening.length ? Math.max(...opening.map((tile) => tile.y + tile.h)) : 0
+    const contentWidth = Math.max(1, right - left)
+    const contentHeight = Math.max(1, bottom - top)
+    const maximum = opening.length <= 2 ? 1.25 : defaultScale
+    const scale = Math.max(0.35, Math.min(maximum,
+      (width - 64) / contentWidth,
+      (height - 130) / contentHeight))
     const target = {
-      x: width * 0.51 - 1080 * scale,
-      y: height * 0.50 - 345 * scale,
+      x: (width - contentWidth * scale) / 2 - left * scale,
+      y: (height - contentHeight * scale) / 2 - top * scale,
       scale,
     }
     if (animated) this.#animateCamera(target, 320)
@@ -583,12 +601,19 @@ class PosterWall {
       x: event.clientX, y: event.clientY,
       originX: event.clientX, originY: event.clientY,
     })
-    this.#dragged = false
+    // A second finger is a new gesture; do not allow either contact to
+    // synthesize a tile click when it leaves the screen.
+    if (this.#pointers.size === 1) {
+      this.#dragged = false
+      this.#gestureUsedPinch = false
+    }
     this.#pointerTile = this.#pointers.size === 1
       ? /** @type {HTMLElement|null} */ (event.target instanceof Element ? event.target.closest('.poster-tile') : null)?.dataset.key ?? null
       : null
     if (this.#pointers.size >= 2) {
+      this.#gestureUsedPinch = true
       this.#dragged = true
+      this.#pointerTile = null
       this.#recordPinch()
     }
   }
@@ -612,7 +637,19 @@ class PosterWall {
     const dy = event.clientY - pointer.y
     pointer.x = event.clientX
     pointer.y = event.clientY
-    if (Math.hypot(pointer.x - pointer.originX, pointer.y - pointer.originY) > 5) this.#dragged = true
+    const totalX = pointer.x - pointer.originX
+    const totalY = pointer.y - pointer.originY
+    if (this.#pointers.size === 1 && !this.#dragged) {
+      // Keep small finger jitter a click. Only start panning after 7px.
+      if (Math.hypot(totalX, totalY) < 7) return
+      this.#dragged = true
+      this.#pointerTile = null
+      this.#camera.x += totalX
+      this.#camera.y += totalY
+      this.#viewport.classList.add('is-dragging')
+      this.#scheduleRender()
+      return
+    }
     if (this.#pointers.size >= 2) {
       this.#dragged = true
       const points = [...this.#pointers.values()]
@@ -639,13 +676,23 @@ class PosterWall {
   #pointerUp(event) {
     const pointer = this.#pointers.get(event.pointerId)
     if (!pointer) return
-    const pick = !this.#dragged && this.#pointers.size === 1 ? this.#pointerTile : null
+    const pick = !this.#dragged && !this.#gestureUsedPinch &&
+      this.#pointers.size === 1 ? this.#pointerTile : null
     this.#pointers.delete(event.pointerId)
-    if (this.#pointers.size < 2) this.#pinchDistance = 0
+    if (this.#pointers.size < 2) {
+      this.#pinchDistance = 0
+      for (const remaining of this.#pointers.values()) {
+        // Do not apply the old finger's entire movement as a pan offset
+        // when one finger stays down after pinching.
+        remaining.originX = remaining.x
+        remaining.originY = remaining.y
+      }
+    }
     if (this.#pointers.size === 0) {
       this.#viewport.classList.remove('is-dragging')
       this.#pointerTile = null
       this.#dragged = false
+      this.#gestureUsedPinch = false
     }
     if (pick && event.type === 'pointerup') this.#toggle(pick)
   }
