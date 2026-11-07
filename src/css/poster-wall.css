@@ -78,6 +78,15 @@
   transition: opacity 230ms ease-out, transform 360ms cubic-bezier(.2,.75,.3,1);
 }
 .poster-tile.is-loaded .poster-tile-media img { opacity: 1; }
+/* Upgrade variants load behind the existing photograph; reveal only on success. */
+.poster-tile .poster-tile-media img.poster-tile-upgrade {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
 @media (hover:hover) and (pointer:fine) {
   .poster-tile.is-loaded:hover .poster-tile-media img { transform: scale(1.025); }
 }
