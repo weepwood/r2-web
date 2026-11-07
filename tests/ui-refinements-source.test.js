@@ -61,3 +61,45 @@ test('settings tabs expose accessible relationships and keyboard navigation', ()
   assert.match(app, /event\.key === 'End'/)
   assert.match(app, /button\.setAttribute\('aria-label', label\)/)
 })
+
+test('preview navigation is constrained to visible supported files and asynchronous updates are guarded', () => {
+  const app = readFileSync(new URL('../src/js/app.js', import.meta.url), 'utf8')
+  const preview = readFileSync(new URL('../src/js/file-preview.js', import.meta.url), 'utf8')
+  const i18n = readFileSync(new URL('../src/js/i18n.js', import.meta.url), 'utf8')
+
+  for (const id of ['preview-stage', 'preview-prev', 'preview-next', 'preview-position']) {
+    if (id === 'preview-stage') assert.match(html, /class="preview-stage"/)
+    else assert.ok(html.includes('id="' + id + '"'))
+  }
+  assert.match(app, /\.file-card:not\(\[hidden\]\)\[data-is-folder="false"\]/)
+  assert.match(app, /#preview-body'\)\.querySelector\('video, audio'\)/)
+  assert.match(preview, /setNavigationItems\(items\)/)
+  assert.match(preview, /const generation = \+\+this\.#loadGeneration/)
+  assert.match(preview, /generation === this\.#loadGeneration && dialog\.open/)
+  assert.match(preview, /if \(!dialog\.open\) dialog\.showModal\(\)/)
+  assert.match(i18n, /previewLoadFailed:/)
+  assert.match(i18n, /previewPrevious:/)
+})
+
+test('upload panel shows real batch progress and handles network errors', () => {
+  const upload = readFileSync(new URL('../src/js/upload-manager.js', import.meta.url), 'utf8')
+  const app = readFileSync(new URL('../src/js/app.js', import.meta.url), 'utf8')
+
+  for (const id of [
+    'upload-panel-overall',
+    'upload-panel-toggle',
+    'upload-panel-progress',
+    'upload-panel-progress-fill',
+    'upload-panel-percent',
+    'upload-panel-summary',
+  ]) {
+    assert.ok(html.includes('id="' + id + '"'))
+  }
+
+  assert.match(upload, /updateOverallProgress\(completed, uploads\.length\)/)
+  assert.match(upload, /setAttribute\('aria-valuenow', String\(percent\)\)/)
+  assert.match(upload, /panel\.dataset\.state = fail === 0 \? 'done' : 'error'/)
+  assert.match(upload, /finally \{\s*if \(bar\) bar\.classList\.remove\('indeterminate'\)/)
+  assert.match(app, /panel\.classList\.toggle\('is-collapsed'\)/)
+  assert.match(styles, /\.upload-panel\.is-collapsed \.upload-panel-body/)
+})
