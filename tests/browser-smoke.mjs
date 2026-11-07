@@ -28,11 +28,10 @@ const mime = {
   '.ico': 'image/x-icon',
 }
 const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9UV5qwkAAAAASUVORK5CYII=', 'base64')
+const IMAGE_COUNT = Number(process.env.R2_SMOKE_COUNT || 3)
 const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult><IsTruncated>false</IsTruncated>
-<Contents><Key>poster-01.jpg</Key><Size>20480</Size><LastModified>2026-11-01T10:00:00Z</LastModified></Contents>
-<Contents><Key>poster-02.jpg</Key><Size>30720</Size><LastModified>2026-11-01T11:00:00Z</LastModified></Contents>
-<Contents><Key>poster-03.jpg</Key><Size>40960</Size><LastModified>2026-11-01T12:00:00Z</LastModified></Contents>
+${Array.from({length:IMAGE_COUNT}, (_, i) => `<Contents><Key>poster-${String(i+1).padStart(4,'0')}.jpg</Key><Size>20480</Size><LastModified>2026-11-01T10:00:00Z</LastModified></Contents>`).join('')}
 </ListBucketResult>`
 
 const server = createServer(async (req, res) => {
@@ -179,7 +178,7 @@ try {
 
   await eventually(() => cdp.evaluate(
     `Boolean(document.querySelector('#app') && !document.querySelector('#app').hidden &&
-      document.querySelectorAll('#file-grid .file-card').length === 3)`
+      document.querySelectorAll('#file-grid .file-card').length === ${IMAGE_COUNT})`
   ), 'connected R2 file list')
 
   await cdp.evaluate(`document.querySelector('#view-wall-btn').click()`)
@@ -187,6 +186,32 @@ try {
     `Boolean(!document.querySelector('#poster-wall').hidden &&
       document.querySelectorAll('.poster-tile').length > 0)`
   ), 'PosterWall opening')
+
+  if (IMAGE_COUNT >= 200) {
+    const before = await cdp.evaluate(`Number(document.querySelector('#poster-wall').dataset.wallRenderPasses || 0)`)
+    const benchmark = await cdp.evaluate(`(async () => {
+      const viewport = document.querySelector('#poster-wall-viewport')
+      for (let i=0; i<48; i++) {
+        viewport.dispatchEvent(new WheelEvent('wheel', {
+          bubbles:true,cancelable:true,deltaMode:0,deltaY:22
+        }))
+        await new Promise(requestAnimationFrame)
+      }
+      return {
+        passes:Number(document.querySelector('#poster-wall').dataset.wallRenderPasses || 0),
+        mounted:document.querySelectorAll('#poster-wall-canvas .poster-tile').length,
+      }
+    })()`)
+    assert.ok(benchmark.mounted <= 180,
+      `Expected <=180 mounted tiles, got ${benchmark.mounted}`)
+    assert.ok(benchmark.passes - before < 18,
+      `Expected fewer than 18 DOM reconciles in 48 wheel frames, got ${benchmark.passes-before}`)
+    console.log(`Wall stress: ${IMAGE_COUNT} objects / 48 wheel frames / ${benchmark.passes-before} DOM reconciles / ${benchmark.mounted} mounted tiles`)
+    // The focus test below should still click a visible tile, so reset
+    // the camera after panning the large synthetic gallery.
+    await cdp.evaluate(`document.querySelector('#wall-reset').click()`)
+    await pause(350)
+  }
 
   // The HTML hidden property alone is insufficient: display:flex/grid rules
   // must not accidentally reveal controls that are meant to be invisible.
