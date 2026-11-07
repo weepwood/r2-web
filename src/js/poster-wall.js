@@ -1,4 +1,5 @@
-import { getThumbnailMode, resolveThumbnailPolicy, selectThumbnailWidth } from './thumbnail-utils.js'
+import { selectThumbnailWidth } from './thumbnail-utils.js'
+import { ImageAssetService } from './image-asset-service.js'
 import { extractFileName } from './utils.js'
 import { t } from './i18n.js'
 import { buildWallLayout, cameraBounds, focusReflow, intersects, preserveTileAnchor, zoomAt } from './poster-wall-layout.js'
@@ -9,6 +10,8 @@ import { buildWallLayout, cameraBounds, focusReflow, intersects, preserveTileAnc
 class PosterWall {
   /** @type {import('./r2-client.js').R2Client} */
   #r2
+  /** @type {ImageAssetService} */
+  #images
   /** @type {(item:ImageItem)=>void} */
   #onPreview
   /** @type {()=>Promise<void>|void} */
@@ -65,6 +68,7 @@ class PosterWall {
    */
   constructor(r2, { onPreview, onLoadMore, onClose }) {
     this.#r2 = r2
+    this.#images = new ImageAssetService(r2)
     this.#onPreview = onPreview
     this.#onMore = onLoadMore
     this.#onClose = onClose
@@ -583,10 +587,7 @@ class PosterWall {
     if (!tile) return
     const desired = task.requestedWidth
     const upgrading = task.node.classList.contains('is-loaded')
-    const publicUrl = this.#r2.getPublicUrl(task.key)
-    const policy = resolveThumbnailPolicy({
-      publicUrl, key: task.key, mode: getThumbnailMode(), width: desired,
-    })
+    const policy = this.#images.thumbnailPlan(task.key, desired)
     if (!policy.url && !policy.allowOriginal) {
       if (!upgrading && live()) task.node.classList.add('is-unavailable')
       return
@@ -597,7 +598,7 @@ class PosterWall {
       // If a CDN upgrade fails, keep the existing low-res image. Never
       // trigger an automatic full-size fallback during an upscale.
       if (!success && !upgrading && live() && policy.allowOriginal) {
-        const source = publicUrl ?? (await this.#r2.getPresignedUrl(task.key))
+        const source = await this.#images.originalUrl(task.key)
         if (!live()) return
         success = await this.#attemptImage(task, source, false)
         fromOriginal = success
