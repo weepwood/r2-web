@@ -25,6 +25,8 @@ class FilePreview {
     this.#ui = ui
     const dialog = /** @type {HTMLDialogElement} */ ($('#preview-dialog'))
     dialog.addEventListener('close', () => {
+      // The close event can run after a rapid reopen; never invalidate the new preview.
+      if (dialog.open) return
       // Ignore any pending HEAD, signed URL or text fetch response after closing.
       this.#loadGeneration++
       this.#currentKey = ''
