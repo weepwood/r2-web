@@ -236,9 +236,12 @@ class PosterWall {
     }
 
     this.#root.classList.toggle('has-active', Boolean(this.#activeKey))
-    /** @type {HTMLElement} */ (document.querySelector('#wall-focus-actions')).hidden = !this.#activeKey
-    /** @type {HTMLElement} */ (document.querySelector('#wall-empty')).hidden = this.#layout.length > 0
-    /** @type {HTMLElement} */ (document.querySelector('#wall-more')).hidden = !this.#hasMore
+    const focusActions = /** @type {HTMLElement} */ (document.querySelector('#wall-focus-actions'))
+    const emptyState = /** @type {HTMLElement} */ (document.querySelector('#wall-empty'))
+    const moreControl = /** @type {HTMLElement} */ (document.querySelector('#wall-more'))
+    focusActions.hidden = !this.#activeKey
+    emptyState.hidden = this.#layout.length > 0
+    moreControl.hidden = !this.#hasMore
     this.#updateHud()
   }
 
