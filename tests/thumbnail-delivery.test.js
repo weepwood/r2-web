@@ -74,7 +74,7 @@ test('listing thumbnail loader uses a concurrency bound and preview still resolv
   assert.match(explorer, /this\.#thumbnailQueue\.push/)
   assert.match(explorer, /if \(!policy\.url && !policy\.allowOriginal\)/)
   assert.match(explorer, /if \(!loaded && policy\.allowOriginal && isCurrent\(\)\)/)
-  assert.match(preview, /this\\.#images\\.originalUrl\\(key\\)/)
+  assert.ok(preview.includes('this.#images.originalUrl(key)'))
   assert.match(html, /id="cfg-thumbnail-mode"/)
   assert.match(html, /id="thumbnail-mode-indicator"/)
   assert.match(app, /setThumbnailMode\(newThumbnailMode\)/)
