@@ -3,6 +3,7 @@ import { LANG_KEY } from './constants.js'
 const I18N = {
   zh: {
     appTitle: 'R2 Web',
+    loadMoreHint: '分页加载，避免一次读取全部文件',
     thumbnailModeLabel: '图片加载策略',
     thumbnailAuto: '智能小图（推荐）',
     thumbnailStrict: '严格省流量（列表绝不加载原图）',
@@ -277,6 +278,7 @@ const I18N = {
   },
   zh_TW: {
     appTitle: 'R2 Web',
+    loadMoreHint: '分頁載入，避免一次讀取所有檔案',
     thumbnailModeLabel: '圖片載入策略',
     thumbnailAuto: '智慧縮圖（建議）',
     thumbnailStrict: '嚴格省流量（列表不載入原圖）',
@@ -551,6 +553,7 @@ const I18N = {
   },
   en: {
     appTitle: 'R2 Web',
+    loadMoreHint: 'Load files by page to keep large folders responsive',
     thumbnailModeLabel: 'Image loading strategy',
     thumbnailAuto: 'Smart thumbnails (recommended)',
     thumbnailStrict: 'Save bandwidth (never load originals in lists)',
@@ -829,6 +832,7 @@ const I18N = {
   },
   ja: {
     appTitle: 'R2 Web',
+    loadMoreHint: '大きなフォルダーを軽快に表示するために分割読み込み',
     thumbnailModeLabel: '画像読み込み方式',
     thumbnailAuto: 'スマートサムネイル（推奨）',
     thumbnailStrict: '通信量を節約（一覧で原本を取得しない）',
