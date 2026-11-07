@@ -172,6 +172,7 @@ export function focusReflow(layout, activeKey) {
 
   const centerX = expanded.x + expanded.w / 2
   const centerY = expanded.y + expanded.h / 2
+  /** @param {{x:number,y:number,w:number,h:number}} rect */
   const distance = (rect) => (rect.x + rect.w / 2 - centerX) ** 2 +
     (rect.y + rect.h / 2 - centerY) ** 2
 
