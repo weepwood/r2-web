@@ -1067,3 +1067,32 @@ dialog .field select:focus {
     display: none;
   }
 }
+
+/* Keyboard and touch refinements. */
+#config-form .config-tab-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+#config-form .config-tab-btn[aria-selected='true'] {
+  font-weight: 650;
+}
+
+@media (pointer: coarse) {
+  #app .toolbar-controls > .icon-btn,
+  #app .toolbar-controls .btn-group > .icon-btn,
+  #app .file-card-menu {
+    min-width: 38px;
+    min-height: 38px;
+  }
+
+  #app .file-card:hover {
+    transform: none;
+  }
+}
+
+@media (max-width: 640px) {
+  #config-form .config-tab-btn[aria-selected='true'] {
+    box-shadow: inset 0 -2px 0 var(--accent);
+  }
+}
