@@ -650,6 +650,20 @@
           </button>
           <small class="text-secondary" id="item-count" hidden></small>
         </div>
+        <div class="toolbar-search" role="search">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <circle cx="10.5" cy="10.5" r="6.5" />
+            <path d="m16 16 4.5 4.5" />
+          </svg>
+          <input id="file-filter-input" type="search" autocomplete="off" spellcheck="false"
+            placeholder="筛选当前目录..." aria-label="筛选当前目录" aria-controls="file-grid" aria-keyshortcuts="/" />
+          <button type="button" id="file-filter-clear" class="filter-clear" aria-label="清除筛选" hidden>
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+          <kbd class="filter-shortcut" aria-hidden="true">/</kbd>
+        </div>
         <div class="flex items-center toolbar-controls" style="gap: 8px">
           <!-- Batch Action Bar -->
           <div class="batch-action-bar" id="batch-action-bar" hidden>
@@ -989,6 +1003,15 @@
             上传文件
           </button>
           <small class="text-secondary" id="empty-upload-hint">拖放、粘贴或点击上传</small>
+        </div>
+        <div class="filter-empty-state" id="filter-empty-state" hidden>
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <circle cx="10.5" cy="10.5" r="6.5" />
+            <path d="m16 16 4.5 4.5" />
+          </svg>
+          <p id="filter-empty-title">没有找到匹配的文件</p>
+          <span id="filter-empty-hint">试试其他关键词，或者清除筛选。</span>
+          <button type="button" class="btn secondary sm" id="filter-empty-clear-btn">清除筛选</button>
         </div>
         <div class="file-grid" id="file-grid"></div>
 
