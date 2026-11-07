@@ -308,8 +308,8 @@ class PosterWall {
     const focusActions = /** @type {HTMLElement} */ (document.querySelector('#wall-focus-actions'))
     const emptyState = /** @type {HTMLElement} */ (document.querySelector('#wall-empty'))
     const moreControl = /** @type {HTMLElement} */ (document.querySelector('#wall-more'))
-    focusActions.hidden = !this.#activeKey
-    if (this.#activeKey) this.#positionFocusActions(focusActions)
+    const actionsVisible = this.#activeKey ? this.#positionFocusActions(focusActions) : false
+    focusActions.hidden = !actionsVisible
     emptyState.hidden = this.#layout.length > 0
     moreControl.hidden = !this.#hasMore
     this.#updateHud()
@@ -319,20 +319,27 @@ class PosterWall {
    * Keep contextual actions near the selected image, clamped to the viewport.
    * Their location is computed from world coordinates, not layout reads.
    * @param {HTMLElement} actions
+   * @returns {boolean} Whether the selected tile is still onscreen.
    */
   #positionFocusActions(actions) {
     const rect = this.#activeKey ? this.#positions.get(this.#activeKey) : null
-    if (!rect) return
+    if (!rect) return false
     const { x, y, scale } = this.#camera
     const viewportWidth = this.#viewport.clientWidth
     const viewportHeight = this.#viewport.clientHeight
+    const projectedLeft = x + rect.x * scale
+    const projectedTop = y + rect.y * scale
     const projectedRight = x + (rect.x + rect.w) * scale
     const projectedBottom = y + (rect.y + rect.h) * scale
+    if (projectedRight < 0 || projectedBottom < 0 || projectedLeft > viewportWidth || projectedTop > viewportHeight) {
+      return false
+    }
     const width = actions.offsetWidth || 220
     const left = Math.max(14, Math.min(projectedRight - width, viewportWidth - width - 14))
     const top = Math.max(79, Math.min(projectedBottom + 10, viewportHeight - 76))
     actions.style.left = `${left}px`
     actions.style.top = `${top}px`
+    return true
   }
 
   /**
@@ -539,7 +546,9 @@ class PosterWall {
         this.zoom(factor, x, y)
       }
     }, { passive: false })
-    this.#viewport.addEventListener('keydown', (event) => this.#keyDown(event))
+    // Controls live outside the viewport, so keyboard shortcuts must be scoped
+    // to the entire presentation (including focused action buttons).
+    this.#root.addEventListener('keydown', (event) => this.#keyDown(event))
     const onClick = (id, cb) => document.querySelector('#' + id).addEventListener('click', cb)
     onClick('wall-close', () => this.close())
     onClick('wall-zoom-in', () => this.zoom(1.23, undefined, undefined, true))
