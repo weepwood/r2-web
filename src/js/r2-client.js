@@ -10,10 +10,14 @@ class R2Client {
   #client = null
   /** @type {ConfigManager | null} */
   #config = null
+  /** @type {Map<string, { url: string; validUntil: number }>} */
+  #presignedGetCache = new Map()
 
   /** @param {ConfigManager} configManager */
   init(configManager) {
     this.#config = configManager
+    // Credentials, endpoint, or active bucket may have changed.
+    this.#presignedGetCache.clear()
     const cfg = configManager.get()
     this.#client = new AwsClient({
       accessKeyId: cfg.accessKeyId,
@@ -120,6 +124,7 @@ class R2Client {
     const url = `${/** @type {ConfigManager} */ (this.#config).getBucketUrl()}/${encodeS3Key(key)}`
     const headers = new Headers()
     if (contentType) headers.set('Content-Type', contentType)
+    this.#presignedGetCache.delete(url)
     const req = await /** @type {AwsClient} */ (this.#client).sign(url, {
       method: 'PUT',
       headers,
@@ -139,10 +144,19 @@ class R2Client {
   /** @param {string} key */
   async getPresignedUrl(key) {
     const url = `${/** @type {ConfigManager} */ (this.#config).getBucketUrl()}/${encodeS3Key(key)}`
+    const cached = this.#presignedGetCache.get(url)
+    if (cached && Date.now() < cached.validUntil) return cached.url
+
     const signed = await /** @type {AwsClient} */ (this.#client).sign(url, {
       method: 'GET',
       aws: { signQuery: true },
     })
+    // A short lifetime avoids relying on any particular signer expiry.
+    // This only caches a URL in memory; no private image bytes are persisted.
+    if (this.#presignedGetCache.size >= 300) {
+      this.#presignedGetCache.delete(this.#presignedGetCache.keys().next().value ?? '')
+    }
+    this.#presignedGetCache.set(url, { url: signed.url, validUntil: Date.now() + 3 * 60_000 })
     return signed.url
   }
 
@@ -185,6 +199,7 @@ class R2Client {
     const url = `${/** @type {ConfigManager} */ (this.#config).getBucketUrl()}/${encodeS3Key(key)}`
     const res = await this.#signedFetch(url, { method: 'DELETE' })
     this.#assertOk(res)
+    this.#presignedGetCache.delete(url)
   }
 
   /** @param {string} src @param {string} dest */
@@ -198,6 +213,7 @@ class R2Client {
       },
     })
     this.#assertOk(res)
+    this.#presignedGetCache.delete(url)
   }
 
   /** @param {string} key @param {string} contentType */
@@ -213,6 +229,7 @@ class R2Client {
       },
     })
     this.#assertOk(res)
+    this.#presignedGetCache.delete(url)
   }
 
   /** @param {string} prefix */
