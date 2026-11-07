@@ -7,6 +7,10 @@ import {
   DENSITY_KEY,
   SORT_BY_KEY,
   SORT_ORDER_KEY,
+  IMAGE_RE,
+  VIDEO_RE,
+  AUDIO_RE,
+  TEXT_RE,
 } from './constants.js'
 import { ConfigManager } from './config-manager.js'
 import { FileExplorer } from './file-explorer.js'
@@ -222,6 +226,14 @@ class App {
     $('#empty-upload-hint').textContent = t('uploadHint')
     $('#paste-hint-text').textContent = t('pasteHint')
 
+    $('#preview-prev').setAttribute('aria-label', t('previewPrevious'))
+    $('#preview-next').setAttribute('aria-label', t('previewNext'))
+    const toggle = $('#upload-panel-toggle')
+    toggle.setAttribute(
+      'aria-label',
+      t($('#upload-panel').classList.contains('is-collapsed') ? 'uploadExpand' : 'uploadCollapse'),
+    )
+    $('#upload-panel-progress').setAttribute('aria-label', t('uploadOverallProgress'))
     $('#load-more-btn').textContent = t('loadMore')
     const filterInput = /** @type {HTMLInputElement} */ ($('#file-filter-input'))
     filterInput.placeholder = t('filterPlaceholder')
@@ -643,6 +655,27 @@ class App {
     })
   }
 
+  /**
+   * Build preview navigation from currently displayed, supported files.
+   * Hidden (locally filtered) rows and folders are excluded.
+   * @param {{key: string, size?: number, lastModified?: number}} item
+   */
+  #openPreview(item) {
+    const files = /** @type {NodeListOf<HTMLElement>} */ (
+      document.querySelectorAll('#file-grid .file-card:not([hidden])[data-is-folder="false"]')
+    )
+    const supported = [IMAGE_RE, VIDEO_RE, AUDIO_RE, TEXT_RE]
+    const items = [...files]
+      .filter((card) => supported.some((re) => re.test(card.dataset.key ?? '')))
+      .map((card) => ({
+        key: card.dataset.key ?? '',
+        size: Number(card.dataset.size ?? 0),
+        lastModified: Number(card.dataset.mod ?? 0),
+      }))
+    this.#preview?.setNavigationItems(items)
+    void this.#preview?.preview(item)
+  }
+
   #bindAppEvents() {
     const filterInput = /** @type {HTMLInputElement} */ ($('#file-filter-input'))
     const clearFilter = () => {
@@ -724,7 +757,7 @@ class App {
         if (card.dataset.isFolder === 'true') {
           /** @type {FileExplorer} */ this.#explorer.navigate(card.dataset.key ?? '')
         } else {
-          /** @type {FilePreview} */ this.#preview.preview({
+          this.#openPreview({
             key: card.dataset.key ?? '',
             size: Number(card.dataset.size ?? 0),
             lastModified: Number(card.dataset.mod ?? 0),
@@ -761,7 +794,7 @@ class App {
 
       switch (action) {
         case 'preview':
-          /** @type {FilePreview} */ this.#preview.preview({
+          this.#openPreview({
             key,
             size: Number(menu.dataset.size ?? 0),
             lastModified: Number(menu.dataset.mod ?? 0),
@@ -841,6 +874,16 @@ class App {
     $('#load-more-btn').addEventListener('click', () => /** @type {FileExplorer} */ (this.#explorer).loadMore())
 
     const previewDialog = /** @type {HTMLDialogElement} */ ($('#preview-dialog'))
+    $('#preview-prev').addEventListener('click', () => this.#preview?.navigate(-1))
+    $('#preview-next').addEventListener('click', () => this.#preview?.navigate(1))
+    previewDialog.addEventListener('keydown', (e) => {
+      if (e.altKey || e.ctrlKey || e.metaKey || !['ArrowLeft', 'ArrowRight'].includes(e.key)) return
+      // Preserve native seek/volume controls in audio and video previews.
+      if ($('#preview-body').querySelector('video, audio')) return
+      if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]')) return
+      e.preventDefault()
+      this.#preview?.navigate(e.key === 'ArrowRight' ? 1 : -1)
+    })
     $('#preview-close').addEventListener('click', () => previewDialog.close())
     previewDialog.addEventListener('click', (e) => {
       if (e.target === previewDialog) previewDialog.close()
@@ -856,6 +899,12 @@ class App {
 
     $('#upload-panel-close').addEventListener('click', () => {
       $('#upload-panel').hidden = true
+    })
+    $('#upload-panel-toggle').addEventListener('click', () => {
+      const panel = $('#upload-panel')
+      const collapsed = panel.classList.toggle('is-collapsed')
+      $('#upload-panel-toggle').setAttribute('aria-expanded', String(!collapsed))
+      $('#upload-panel-toggle').setAttribute('aria-label', t(collapsed ? 'uploadExpand' : 'uploadCollapse'))
     })
 
     $('#sort-name-btn').addEventListener('click', () => this.#setSortBy('name'))
