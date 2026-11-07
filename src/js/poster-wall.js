@@ -4,7 +4,7 @@ import { t } from './i18n.js'
 import { buildWallLayout, cameraBounds, focusReflow, intersects, zoomAt } from './poster-wall-layout.js'
 
 /** @typedef {{key:string,size?:number,lastModified?:number|string}} ImageItem */
-/** @typedef {{key:string,node:HTMLButtonElement,img:HTMLImageElement,cancel:()=>void,active:boolean,stopped:boolean}} ImageTask */
+/** @typedef {{key:string,node:HTMLButtonElement,img:HTMLImageElement,cancel:()=>void,active:boolean,stopped:boolean,requestedWidth:number}} ImageTask */
 
 class PosterWall {
   /** @type {import('./r2-client.js').R2Client} */
@@ -25,6 +25,8 @@ class PosterWall {
   #items = []
   /** @type {ReturnType<typeof buildWallLayout>} */
   #layout = []
+  /** @type {Map<string,import('./poster-wall-layout.js').WallTile>} */
+  #tileByKey = new Map()
   /** @type {ReturnType<typeof focusReflow>} */
   #positions = new Map()
   /** @type {Map<string,HTMLButtonElement>} */
@@ -35,6 +37,8 @@ class PosterWall {
   #imageQueue = []
   #activeImageLoads = 0
   #maxImageLoads = 4
+  #qualityTimer = 0
+  #lastQualityScale = 0
   #camera = { x: 40, y: 80, scale: 0.76 }
   /** @type {string|null} */
   #activeKey = null
@@ -132,6 +136,9 @@ class PosterWall {
     this.#backgroundInert.clear()
     if (this.#renderFrame) cancelAnimationFrame(this.#renderFrame)
     this.#renderFrame = 0
+    window.clearTimeout(this.#qualityTimer)
+    this.#qualityTimer = 0
+    this.#lastQualityScale = 0
     this.#cancelCameraMotion()
     this.#pointers.clear()
     this.#gestureUsedPinch = false
@@ -173,6 +180,7 @@ class PosterWall {
 
   #recalculate() {
     this.#layout = buildWallLayout(this.#items, { columns: this.#columnCount })
+    this.#tileByKey = new Map(this.#layout.map((tile) => [tile.key, tile]))
     this.#positions = focusReflow(this.#layout, this.#activeKey)
   }
 
@@ -322,6 +330,16 @@ class PosterWall {
       }
     }
 
+    // Visible images are favored over overscan; start requests only after
+    // the whole visible set has been reconciled.
+    this.#imageQueue = this.#imageQueue.filter((task) => !task.stopped)
+    this.#imageQueue.sort((a, b) => this.#imagePriority(a.key) - this.#imagePriority(b.key))
+    this.#pumpImages()
+    if (Math.abs(this.#lastQualityScale - scale) >= 0.025) {
+      this.#lastQualityScale = scale
+      this.#scheduleQualityCheck()
+    }
+
     this.#root.classList.toggle('has-active', Boolean(this.#activeKey))
     const focusActions = /** @type {HTMLElement} */ (document.querySelector('#wall-focus-actions'))
     const emptyState = /** @type {HTMLElement} */ (document.querySelector('#wall-empty'))
@@ -438,18 +456,64 @@ class PosterWall {
     if (zoom) zoom.textContent = Math.round(this.#camera.scale * 100) + '%'
   }
 
+  /** @param {string} key */
+  #imagePriority(key) {
+    const tile = this.#positions.get(key)
+    if (!tile) return Number.POSITIVE_INFINITY
+    const { x, y, scale } = this.#camera
+    const centerX = (this.#viewport.clientWidth / 2 - x) / scale
+    const centerY = (this.#viewport.clientHeight / 2 - y) / scale
+    const distance = Math.hypot(tile.x + tile.w / 2 - centerX, tile.y + tile.h / 2 - centerY)
+    const onscreen = intersects(tile, cameraBounds(this.#camera, this.#viewport.clientWidth,
+      this.#viewport.clientHeight, 0))
+    return distance + (onscreen ? 0 : 100000)
+  }
+
   /** @param {import('./poster-wall-layout.js').WallTile} tile @param {HTMLButtonElement} node */
   #enqueueImage(tile, node) {
+    const currentWidth = Number(node.dataset.wallImageWidth || 0)
+    const requestedWidth = selectThumbnailWidth(Math.min(640, tile.w * this.#camera.scale),
+      window.devicePixelRatio || 1)
+    if (currentWidth >= requestedWidth || this.#imageTasks.has(tile.key)) return
+    if (Number(node.dataset.wallFailedWidth || 0) === requestedWidth) return
     const task = /** @type {ImageTask} */ ({
       key: tile.key,
       node,
-      img: /** @type {HTMLImageElement} */ (node.querySelector('img')),
+      img: /** @type {HTMLImageElement} */ (node.querySelector('.poster-tile-media img:not(.poster-tile-upgrade)')),
       cancel: () => {},
       active: false,
       stopped: false,
+      requestedWidth,
     })
     this.#imageTasks.set(tile.key, task)
     this.#imageQueue.push(task)
+  }
+
+  #scheduleQualityCheck() {
+    window.clearTimeout(this.#qualityTimer)
+    if (!this.isOpen) return
+    // Waiting until a zoom gesture settles prevents request storms while
+    // crossing the 160/320/480/640px resolution boundaries.
+    this.#qualityTimer = window.setTimeout(() => {
+      this.#qualityTimer = 0
+      this.#upgradeVisibleImages()
+    }, 230)
+  }
+
+  #upgradeVisibleImages() {
+    if (!this.isOpen) return
+    const visibleBounds = cameraBounds(this.#camera,
+      this.#viewport.clientWidth, this.#viewport.clientHeight, 0)
+    for (const [key, node] of this.#nodes) {
+      const tile = this.#tileByKey.get(key)
+      const rect = this.#positions.get(key)
+      if (!tile || !rect || !intersects(rect, visibleBounds)) continue
+      // Do not upgrade a failed/placeholder tile and never prefetch an original
+      // just because a user is zooming the canvas.
+      if (!node.classList.contains('is-loaded')) continue
+      this.#enqueueImage(tile, node)
+    }
+    this.#imageQueue.sort((a, b) => this.#imagePriority(a.key) - this.#imagePriority(b.key))
     this.#pumpImages()
   }
 
@@ -462,6 +526,12 @@ class PosterWall {
       void this.#loadImage(task).finally(() => {
         this.#activeImageLoads--
         if (this.#imageTasks.get(task.key) === task) this.#imageTasks.delete(task.key)
+        if (!task.stopped && task.node.classList.contains('is-loaded')) {
+          const tile = this.#tileByKey.get(task.key)
+          const desired = tile ? selectThumbnailWidth(Math.min(640, tile.w * this.#camera.scale),
+            window.devicePixelRatio || 1) : 0
+          if (desired > Number(task.node.dataset.wallImageWidth || 0)) this.#scheduleQualityCheck()
+        }
         this.#pumpImages()
       })
     }
@@ -471,62 +541,100 @@ class PosterWall {
   async #loadImage(task) {
     const live = () => !task.stopped && this.isOpen && this.#nodes.get(task.key) === task.node
     if (!live()) return
-    const tile = this.#layout.find((item) => item.key === task.key)
+    const tile = this.#tileByKey.get(task.key)
     if (!tile) return
+    const desired = task.requestedWidth
+    const upgrading = task.node.classList.contains('is-loaded')
     const publicUrl = this.#r2.getPublicUrl(task.key)
-    const desired = selectThumbnailWidth(Math.min(640, tile.w * this.#camera.scale), window.devicePixelRatio || 1)
     const policy = resolveThumbnailPolicy({
       publicUrl, key: task.key, mode: getThumbnailMode(), width: desired,
     })
     if (!policy.url && !policy.allowOriginal) {
-      if (live()) task.node.classList.add('is-unavailable')
+      if (!upgrading && live()) task.node.classList.add('is-unavailable')
       return
     }
     try {
-      let success = policy.url ? await this.#attemptImage(task, policy.url) : false
-      if (!success && live() && policy.allowOriginal) {
+      let success = policy.url ? await this.#attemptImage(task, policy.url, upgrading) : false
+      let fromOriginal = false
+      // If a CDN upgrade fails, keep the existing low-res image. Never
+      // trigger an automatic full-size fallback during an upscale.
+      if (!success && !upgrading && live() && policy.allowOriginal) {
         const source = publicUrl ?? (await this.#r2.getPresignedUrl(task.key))
         if (!live()) return
-        success = await this.#attemptImage(task, source)
+        success = await this.#attemptImage(task, source, false)
+        fromOriginal = success
       }
       if (!live()) return
-      task.node.classList.toggle('is-loaded', success)
-      task.node.classList.toggle('is-unavailable', !success)
+      if (success) {
+        task.node.dataset.wallImageWidth = String(fromOriginal ? 99999 : desired)
+        delete task.node.dataset.wallFailedWidth
+        task.node.classList.add('is-loaded')
+        task.node.classList.remove('is-unavailable')
+      } else if (!upgrading) {
+        task.node.classList.add('is-unavailable')
+      } else {
+        task.node.dataset.wallFailedWidth = String(desired)
+      }
     } catch {
-      if (live()) task.node.classList.add('is-unavailable')
+      if (live()) {
+        if (upgrading) task.node.dataset.wallFailedWidth = String(desired)
+        else task.node.classList.add('is-unavailable')
+      }
     }
   }
 
   /**
+   * Preload a higher-resolution image behind the existing tile. Only swap
+   * DOM nodes once the new variant is decoded by the browser. This avoids
+   * flicker, broken placeholders and a second GET for non-cacheable URLs.
    * @param {ImageTask} task
    * @param {string} url
+   * @param {boolean} upgrade
    * @returns {Promise<boolean>}
    */
-  #attemptImage(task, url) {
+  #attemptImage(task, url, upgrade) {
     return new Promise((resolve) => {
       if (task.stopped) { resolve(false); return }
+      const img = upgrade ? document.createElement('img') : task.img
+      if (upgrade) {
+        img.className = 'poster-tile-upgrade'
+        img.alt = ''
+        img.decoding = 'async'
+        img.draggable = false
+        img.loading = 'eager'
+        task.node.querySelector('.poster-tile-media')?.append(img)
+      }
       let finished = false
       /** @param {boolean} success */
       const settle = (success) => {
         if (finished) return
         finished = true
         clearTimeout(timeout)
-        task.img.onload = null
-        task.img.onerror = null
+        img.onload = null
+        img.onerror = null
         task.cancel = () => {}
+        if (upgrade) {
+          if (success && !task.stopped) {
+            task.img.remove()
+            img.classList.remove('poster-tile-upgrade')
+            task.img = img
+          } else {
+            img.remove()
+          }
+        }
         resolve(success)
       }
       const timeout = setTimeout(() => {
-        task.img.removeAttribute('src')
+        if (!upgrade) img.removeAttribute('src')
         settle(false)
       }, 15000)
       task.cancel = () => {
-        task.img.removeAttribute('src')
+        if (!upgrade) img.removeAttribute('src')
         settle(false)
       }
-      task.img.onload = () => settle(true)
-      task.img.onerror = () => settle(false)
-      task.img.src = url
+      img.onload = () => settle(true)
+      img.onerror = () => settle(false)
+      img.src = url
     })
   }
 
