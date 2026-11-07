@@ -524,17 +524,17 @@ class UploadManager {
 
   /** @param {string} id @param {string} key @param {File} file @param {string} contentType */
   async #uploadSingleFile(id, key, file, contentType) {
-    const signed = await this.#r2.putObjectSigned(key, contentType)
     const bar = $(`#${id}-bar`)
 
-    if (bar) bar.classList.add('indeterminate')
-
-    const headers = new Headers()
-    for (const [k, v] of Object.entries(signed.headers)) {
-      if (k.toLowerCase() !== 'host') headers.set(k, v)
-    }
-
     try {
+      const signed = await this.#r2.putObjectSigned(key, contentType)
+      if (bar) bar.classList.add('indeterminate')
+
+      const headers = new Headers()
+      for (const [k, v] of Object.entries(signed.headers)) {
+        if (k.toLowerCase() !== 'host') headers.set(k, v)
+      }
+
       const res = await fetch(signed.url, {
         method: 'PUT',
         headers,
@@ -542,6 +542,7 @@ class UploadManager {
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
     } catch (error) {
+      // Signing failures and network failures must both leave a visible error state.
       if (bar) bar.classList.add('error')
       throw error
     } finally {
