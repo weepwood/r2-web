@@ -2,6 +2,7 @@ import { filesize } from 'filesize'
 import { AUDIO_RE, IMAGE_RE, TEXT_RE, VIDEO_RE } from './constants.js'
 import { t } from './i18n.js'
 import { R2Client } from './r2-client.js'
+import { ImageAssetService } from './image-asset-service.js'
 import { UIManager } from './ui-manager.js'
 import { $, formatDate, getErrorMessage, extractFileName, getMimeType } from './utils.js'
 
@@ -10,6 +11,8 @@ import { $, formatDate, getErrorMessage, extractFileName, getMimeType } from './
 class FilePreview {
   /** @type {R2Client} */
   #r2
+  /** @type {ImageAssetService} */
+  #images
   /** @type {UIManager} */
   #ui
   #currentKey = ''
@@ -22,6 +25,7 @@ class FilePreview {
   /** @param {R2Client} r2 @param {UIManager} ui */
   constructor(r2, ui) {
     this.#r2 = r2
+    this.#images = new ImageAssetService(r2)
     this.#ui = ui
     const dialog = /** @type {HTMLDialogElement} */ ($('#preview-dialog'))
     dialog.addEventListener('close', () => {
@@ -147,7 +151,7 @@ class FilePreview {
       })
 
       if (IMAGE_RE.test(key) || VIDEO_RE.test(key) || AUDIO_RE.test(key) || TEXT_RE.test(key)) {
-        const url = this.#r2.getPublicUrl(key) ?? (await this.#r2.getPresignedUrl(key))
+        const url = await this.#images.originalUrl(key)
         if (!isCurrent()) return
         this.#currentUrl = url
 
