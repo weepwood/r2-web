@@ -277,6 +277,10 @@ class PosterWall {
     if (!this.isOpen) return
     const { x, y, scale } = this.#camera
     this.#canvas.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${scale})`
+    // At overview zoom, typography withdraws so the photographs read as one
+    // continuous mosaic. Hover, keyboard focus and selection still reveal it.
+    const zoomLevel = scale < 0.58 ? 'overview' : scale > 1.45 ? 'detail' : 'normal'
+    if (this.#root.dataset.zoomLevel !== zoomLevel) this.#root.dataset.zoomLevel = zoomLevel
     const bounds = cameraBounds(this.#camera, this.#viewport.clientWidth, this.#viewport.clientHeight)
     const visible = new Set()
     for (const tile of this.#layout) {
