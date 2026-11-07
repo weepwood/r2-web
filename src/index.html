@@ -565,11 +565,16 @@
     <div id="app" hidden>
       <!-- Topbar -->
       <header class="topbar">
-        <div class="flex items-center" style="gap: 8px">
-          <img src="favicon.ico" alt="" class="topbar-logo" />
-          <h1 class="topbar-title">R2 Web</h1>
+        <div class="flex items-center topbar-brand" style="gap: 8px">
+          <span class="topbar-logo-wrap" aria-hidden="true">
+            <img src="favicon.ico" alt="" class="topbar-logo" />
+          </span>
+          <div class="topbar-brand-copy">
+            <h1 class="topbar-title">R2 Web</h1>
+            <span class="topbar-subtitle">Cloudflare R2</span>
+          </div>
         </div>
-        <div class="flex items-center" style="gap: 4px">
+        <div class="flex items-center topbar-actions" style="gap: 4px">
           <button type="button" class="icon-btn" id="share-btn" data-tooltip="分享配置">
             <svg
               class="icon"
@@ -623,7 +628,7 @@
 
       <!-- Toolbar -->
       <div class="toolbar">
-        <div class="flex items-center" style="gap: 4px">
+        <div class="flex items-center toolbar-location" style="gap: 4px">
           <nav aria-label="Breadcrumb">
             <ol class="breadcrumb" id="breadcrumb">
               <li><button type="button" class="breadcrumb-btn" data-prefix="">根目录</button></li>
@@ -645,7 +650,7 @@
           </button>
           <small class="text-secondary" id="item-count" hidden></small>
         </div>
-        <div class="flex items-center" style="gap: 8px">
+        <div class="flex items-center toolbar-controls" style="gap: 8px">
           <!-- Batch Action Bar -->
           <div class="batch-action-bar" id="batch-action-bar" hidden>
             <span class="batch-count" id="batch-count"></span>
