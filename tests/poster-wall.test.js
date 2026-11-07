@@ -105,7 +105,7 @@ test('PosterWall uses independent canvas, culling, local image policy and reques
   assert.match(explorer,/suspendThumbnails\(paused\)/)
   assert.match(wall,/cameraBounds\(this\.#camera/)
   assert.match(wall,/this\.#nodes\.delete\(key\)/)
-  assert.match(wall,/this\\.#images\\.thumbnailPlan\\(/)
+  assert.ok(wall.includes('this.#images.thumbnailPlan('))
   assert.match(wall,/if \(!policy\.url && !policy\.allowOriginal\)/)
   assert.match(wall,/this\.#onPreview\(item\)/)
   assert.match(wall,/prefers-reduced-motion: reduce/)
