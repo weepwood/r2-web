@@ -9,6 +9,7 @@ import {
   cameraBounds,
   focusReflow,
   intersects,
+  preserveTileAnchor,
   zoomAt,
 } from '../src/js/poster-wall-layout.js'
 
@@ -144,5 +145,23 @@ test('every expanded mosaic position keeps at least a six-pixel gutter', () => {
     }
     const repeat = focusReflow(layout, active.key)
     assert.deepEqual(positions, repeat, 'focus reflow must be deterministic')
+  }
+})
+
+test('responsive mosaic change retains the same image screen anchor', () => {
+  const before = buildWallLayout(fixtures.slice(0, 70), { columns: 3 })
+  const after = buildWallLayout(fixtures.slice(0, 70), { columns: 2 })
+  const camera = { x: -740, y: -165, scale: 0.81 }
+  for (const index of [0, 7, 17, 31, 52, 68]) {
+    const oldTile = before[index]
+    const newTile = after[index]
+    const oldX = camera.x + (oldTile.x + oldTile.w / 2) * camera.scale
+    const oldY = camera.y + (oldTile.y + oldTile.h / 2) * camera.scale
+    const retained = preserveTileAnchor(camera, oldTile, newTile)
+    const newX = retained.x + (newTile.x + newTile.w / 2) * retained.scale
+    const newY = retained.y + (newTile.y + newTile.h / 2) * retained.scale
+    assert.ok(Math.abs(newX - oldX) < 0.000001)
+    assert.ok(Math.abs(newY - oldY) < 0.000001)
+    assert.equal(retained.scale, camera.scale)
   }
 })
