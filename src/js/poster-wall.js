@@ -40,6 +40,7 @@ class PosterWall {
   #activeKey = null
   #hasMore = false
   #renderFrame = 0
+  #cameraFrame = 0
   #reducedMotion = false
   #pinchDistance = 0
   #lastPinchCenter = { x: 0, y: 0 }
@@ -116,6 +117,7 @@ class PosterWall {
     this.#root.hidden = true
     if (this.#renderFrame) cancelAnimationFrame(this.#renderFrame)
     this.#renderFrame = 0
+    this.#cancelCameraMotion()
     this.#pointers.clear()
     this.#activeKey = null
     this.#pinchDistance = 0
@@ -153,22 +155,66 @@ class PosterWall {
     this.#positions = focusReflow(this.#layout, this.#activeKey)
   }
 
-  resetCamera() {
+  /** @param {boolean} [animated] */
+  resetCamera(animated = false) {
     const width = this.#viewport.clientWidth || window.innerWidth
     const height = this.#viewport.clientHeight || window.innerHeight
     const scale = width < 640 ? 0.54 : width < 1100 ? 0.66 : 0.76
-    this.#camera = {
+    const target = {
       x: width * 0.51 - 1080 * scale,
       y: height * 0.50 - 345 * scale,
       scale,
     }
-    this.#scheduleRender()
+    if (animated) this.#animateCamera(target, 320)
+    else {
+      this.#cancelCameraMotion()
+      this.#camera = target
+      this.#scheduleRender()
+    }
   }
 
-  /** @param {number} factor @param {number} [x] @param {number} [y] */
-  zoom(factor, x = this.#viewport.clientWidth / 2, y = this.#viewport.clientHeight / 2) {
-    this.#camera = zoomAt(this.#camera, x, y, this.#camera.scale * factor)
-    this.#scheduleRender()
+  /** @param {number} factor @param {number} [x] @param {number} [y] @param {boolean} [animated] */
+  zoom(factor, x = this.#viewport.clientWidth / 2, y = this.#viewport.clientHeight / 2, animated = false) {
+    const target = zoomAt(this.#camera, x, y, this.#camera.scale * factor)
+    if (animated) this.#animateCamera(target, 235)
+    else {
+      this.#cancelCameraMotion()
+      this.#camera = target
+      this.#scheduleRender()
+    }
+  }
+
+  #cancelCameraMotion() {
+    if (this.#cameraFrame) cancelAnimationFrame(this.#cameraFrame)
+    this.#cameraFrame = 0
+  }
+
+  /**
+   * Short interruptible UI-camera motion. Real pointer movements cancel it.
+   * @param {{x:number,y:number,scale:number}} target
+   * @param {number} duration
+   */
+  #animateCamera(target, duration) {
+    this.#cancelCameraMotion()
+    if (this.#reducedMotion) {
+      this.#camera = target
+      this.#scheduleRender()
+      return
+    }
+    const from = { ...this.#camera }
+    const started = performance.now()
+    const tick = (now) => {
+      const t = Math.min(1, (now - started) / duration)
+      const eased = 1 - Math.pow(1 - t, 3)
+      this.#camera = {
+        x: from.x + (target.x - from.x) * eased,
+        y: from.y + (target.y - from.y) * eased,
+        scale: from.scale + (target.scale - from.scale) * eased,
+      }
+      this.#scheduleRender()
+      this.#cameraFrame = t < 1 ? requestAnimationFrame(tick) : 0
+    }
+    this.#cameraFrame = requestAnimationFrame(tick)
   }
 
   #scheduleRender() {
@@ -202,15 +248,21 @@ class PosterWall {
         this.#enqueueImage(tile, node)
       }
       // An interrupted spring starts at the tile's current visual location.
-      if (previous?.has(tile.key)) node.getAnimations().forEach((a) => a.cancel())
-      node.style.left = `${rect.x}px`
-      node.style.top = `${rect.y}px`
-      node.style.width = `${rect.w}px`
-      node.style.height = `${rect.h}px`
+      if (previous?.has(tile.key)) node.getAnimations().forEach((animation) => animation.cancel())
+      const layoutId = `${rect.x},${rect.y},${rect.w},${rect.h}`
+      if (node.dataset.layoutRect !== layoutId) {
+        node.dataset.layoutRect = layoutId
+        node.style.left = `${rect.x}px`
+        node.style.top = `${rect.y}px`
+        node.style.width = `${rect.w}px`
+        node.style.height = `${rect.h}px`
+      }
       const active = tile.key === this.#activeKey
-      node.classList.toggle('is-active', active)
-      node.setAttribute('aria-pressed', String(active))
-      node.style.zIndex = active ? '5' : '1'
+      if (node.classList.contains('is-active') !== active) {
+        node.classList.toggle('is-active', active)
+        node.setAttribute('aria-pressed', String(active))
+        node.style.zIndex = active ? '5' : '1'
+      }
     }
 
     // Virtualization: preserve only visible, overscanned, focused or expanded tiles.
@@ -240,13 +292,34 @@ class PosterWall {
     const emptyState = /** @type {HTMLElement} */ (document.querySelector('#wall-empty'))
     const moreControl = /** @type {HTMLElement} */ (document.querySelector('#wall-more'))
     focusActions.hidden = !this.#activeKey
+    if (this.#activeKey) this.#positionFocusActions(focusActions)
     emptyState.hidden = this.#layout.length > 0
     moreControl.hidden = !this.#hasMore
     this.#updateHud()
   }
 
   /**
-   * FLIP animation with an underdamped spring curve. New interactions sample
+   * Keep contextual actions near the selected image, clamped to the viewport.
+   * Their location is computed from world coordinates, not layout reads.
+   * @param {HTMLElement} actions
+   */
+  #positionFocusActions(actions) {
+    const rect = this.#activeKey ? this.#positions.get(this.#activeKey) : null
+    if (!rect) return
+    const { x, y, scale } = this.#camera
+    const viewportWidth = this.#viewport.clientWidth
+    const viewportHeight = this.#viewport.clientHeight
+    const projectedRight = x + (rect.x + rect.w) * scale
+    const projectedBottom = y + (rect.y + rect.h) * scale
+    const width = actions.offsetWidth || 220
+    const left = Math.max(14, Math.min(projectedRight - width, viewportWidth - width - 14))
+    const top = Math.max(79, Math.min(projectedBottom + 10, viewportHeight - 76))
+    actions.style.left = `${left}px`
+    actions.style.top = `${top}px`
+  }
+
+  /**
+   * FLIP animation with a restrained underdamped spring curve. New interactions sample
    * the live bounding box, cancel the old animation, and start from that point.
    * @param {HTMLElement} node
    * @param {number} dx
@@ -256,16 +329,16 @@ class PosterWall {
    */
   #spring(node, dx, dy, sx, sy) {
     const frames = []
-    for (let step = 0; step <= 24; step++) {
-      const t = step / 24
-      const progress = step === 24 ? 1 : 1 - Math.exp(-7.8 * t) * (Math.cos(10.8 * t) + 0.18 * Math.sin(10.8 * t))
+    for (let step = 0; step <= 20; step++) {
+      const t = step / 20
+      const progress = step === 20 ? 1 : 1 - Math.exp(-9 * t) * (Math.cos(6.2 * t) + 0.32 * Math.sin(6.2 * t))
       const left = 1 - progress
       frames.push({
         offset: t,
         transform: `translate3d(${dx * left}px, ${dy * left}px, 0) scale(${1 + (sx - 1) * left}, ${1 + (sy - 1) * left})`,
       })
     }
-    node.animate(frames, { duration: 630, easing: 'linear', fill: 'none' })
+    node.animate(frames, { duration: 480, easing: 'linear', fill: 'none' })
   }
 
   /** @param {import('./poster-wall-layout.js').WallTile} tile */
@@ -273,6 +346,7 @@ class PosterWall {
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'poster-tile'
+    button.classList.toggle('is-compact', tile.w < 330 || tile.h < 330)
     button.dataset.key = tile.key
     button.setAttribute('aria-pressed', 'false')
     button.setAttribute('aria-label', t('wallOpenTile') + ': ' + extractFileName(tile.key))
@@ -444,16 +518,16 @@ class PosterWall {
         this.#camera.y -= event.deltaX
         this.#scheduleRender()
       } else {
-        const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.008 : 0.0019))
+        const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.0022 : 0.00125))
         this.zoom(factor, x, y)
       }
     }, { passive: false })
     this.#viewport.addEventListener('keydown', (event) => this.#keyDown(event))
     const onClick = (id, cb) => document.querySelector('#' + id).addEventListener('click', cb)
     onClick('wall-close', () => this.close())
-    onClick('wall-zoom-in', () => this.zoom(1.23))
-    onClick('wall-zoom-out', () => this.zoom(1 / 1.23))
-    onClick('wall-reset', () => this.resetCamera())
+    onClick('wall-zoom-in', () => this.zoom(1.23, undefined, undefined, true))
+    onClick('wall-zoom-out', () => this.zoom(1 / 1.23, undefined, undefined, true))
+    onClick('wall-reset', () => this.resetCamera(true))
     onClick('wall-collapse', () => {
       if (this.#activeKey) this.#toggle(this.#activeKey)
       this.#viewport.focus({ preventScroll: true })
@@ -477,6 +551,7 @@ class PosterWall {
   /** @param {PointerEvent} event */
   #pointerDown(event) {
     if (event.pointerType === 'mouse' && event.button !== 0) return
+    this.#cancelCameraMotion()
     this.#viewport.setPointerCapture(event.pointerId)
     this.#pointers.set(event.pointerId, {
       x: event.clientX, y: event.clientY,
