@@ -23,7 +23,7 @@ test('brand refresh preserves JS binding targets and bucket switcher anchor', ()
 })
 
 test('responsive, density, themes and motion preference are preserved', () => {
-  assert.match(styles, /--accent:\\s*light-dark\\(/)
+  assert.match(styles, /--accent:\s*light-dark\(/)
   assert.match(styles, /\[data-view='list'\]/)
   assert.match(styles, /\[data-density='compact'\]/)
   assert.match(styles, /\[data-density='loose'\]/)
