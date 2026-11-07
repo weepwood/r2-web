@@ -79,23 +79,26 @@ class App {
 
     const urlParams = new URLSearchParams(window.location.search)
     const configParam = urlParams.get('config')
-    if (configParam) {
-      if (this.#config.loadFromBase64(configParam)) {
-        const cleanUrl = new URL(window.location.href)
-        cleanUrl.searchParams.delete('config')
-        window.history.replaceState({}, '', cleanUrl.toString())
-        const lang = localStorage.getItem(LANG_KEY)
-        if (lang) setLang(/** @type {Lang} */ (lang))
-        const theme = localStorage.getItem(THEME_KEY)
-        if (theme) this.#ui.setTheme(theme)
-      }
+    // Remove shared payloads from the address bar even if malformed. Legacy
+    // links may have contained secrets; do not retain them in the active URL.
+    if (configParam !== null) {
+      const cleanUrl = new URL(window.location.href)
+      cleanUrl.searchParams.delete('config')
+      window.history.replaceState({}, '', cleanUrl.toString())
+    }
+    const importedConfig = Boolean(configParam) && this.#config.loadFromBase64(configParam)
+    if (importedConfig) {
+      const lang = localStorage.getItem(LANG_KEY)
+      if (lang) setLang(/** @type {Lang} */ (lang))
+      const theme = localStorage.getItem(THEME_KEY)
+      if (theme) this.#ui.setTheme(theme)
     }
 
     this.#applyI18nToHTML()
 
     if (this.#config.isValid()) {
       this.#connectAndLoad()
-      if (configParam) {
+      if (importedConfig) {
         setTimeout(() => this.#ui.toast(t('configLoadedFromUrl'), 'success'), 500)
       }
     } else {
