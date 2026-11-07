@@ -31,6 +31,8 @@ class FileExplorer {
   #selection = new Map()
   /** @type {((count: number) => void) | null} */
   #onSelectionChange = null
+  /** @type {(() => void) | null} */
+  #onDirectoryChange = null
   #loadGen = 0
   #loadingPageGeneration = -1
   #filterQuery = ''
@@ -79,6 +81,11 @@ class FileExplorer {
   /** @param {(count: number) => void} cb */
   setOnSelectionChange(cb) {
     this.#onSelectionChange = cb
+  }
+
+  /** @param {() => void} cb */
+  setOnDirectoryChange(cb) {
+    this.#onDirectoryChange = cb
   }
 
   /** @returns {SelectionItem[]} */
@@ -215,6 +222,7 @@ class FileExplorer {
 
   /** @param {string} prefix */
   async navigate(prefix) {
+    this.#onDirectoryChange?.()
     this.#resetThumbnails()
     this.clearSelection()
     this.#filterQuery = ''
@@ -356,6 +364,7 @@ class FileExplorer {
     card.className = 'file-card'
     card.dataset.key = item.key
     card.dataset.isFolder = String(item.isFolder)
+    card.dataset.filetype = item.isFolder ? 'folder' : getFileType(item.key)
     if (!item.isFolder) {
       card.dataset.size = String(item.size ?? 0)
       if (item.lastModified) {
@@ -396,6 +405,12 @@ class FileExplorer {
           : ''
       }
       <div class="file-card-actions">
+        <button type="button" class="icon-btn sm file-card-details" title="${t('detailsAction')}" aria-label="${t('detailsAction')}">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 11v5M12 8h.01" />
+          </svg>
+        </button>
         <button type="button" class="icon-btn sm file-card-menu" title="More">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
         </button>
@@ -535,6 +550,7 @@ class FileExplorer {
   }
 
   async refresh() {
+    this.#onDirectoryChange?.()
     this.#resetThumbnails()
     this.clearSelection()
     this.invalidateCache(this.#prefix)
