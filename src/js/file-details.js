@@ -1,6 +1,6 @@
 import { filesize } from 'filesize'
 import { t } from './i18n.js'
-import { $, extractFileName, formatDate, getMimeType } from './utils.js'
+import { $, extractFileName, formatDate, getFileIconSvg, getMimeType } from './utils.js'
 
 /** @typedef {{key: string, isFolder: boolean, size: number, modified: number, type: string}} DetailsItem */
 
@@ -105,7 +105,14 @@ class FileDetails {
     $('#details-modified').textContent = item.modified ? formatDate(item.modified) : '—'
     $('#details-type').textContent = item.isFolder ? t('detailsFolder') : getMimeType(item.key)
     $('#details-path').textContent = item.key
-    $('#details-art').dataset.type = item.isFolder ? 'folder' : item.type
+    const art = $('#details-art')
+    art.dataset.type = item.isFolder ? 'folder' : item.type
+    // Only static, locally authored icons; the file key is never HTML-interpolated.
+    art.innerHTML = item.isFolder
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>'
+      : item.type === 'image'
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m3 18 6-6 4 4 3-3 5 5"/></svg>'
+        : getFileIconSvg(/** @type {'video'|'audio'|'text'|'document'|'archive'|'code'|'file'} */ (item.type))
     $('#details-open-text').textContent = item.isFolder ? t('detailsOpenFolder') : t('preview')
     $('#details-download').hidden = item.isFolder
   }
