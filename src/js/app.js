@@ -16,6 +16,7 @@ import { ConfigManager } from './config-manager.js'
 import { FileExplorer } from './file-explorer.js'
 import { FileOperations } from './file-operations.js'
 import { FilePreview } from './file-preview.js'
+import { FileDetails } from './file-details.js'
 import { UploadManager } from './upload-manager.js'
 import { R2Client } from './r2-client.js'
 import { getThumbnailMode, setThumbnailMode } from './thumbnail-utils.js'
@@ -41,6 +42,8 @@ class App {
   #preview = null
   /** @type {FileOperations | null} */
   #ops = null
+  /** @type {FileDetails} */
+  #details
   #appEventsBound = false
   #batchMode = false
   /** @type {((e: TransitionEvent) => void) | null} */
@@ -50,6 +53,12 @@ class App {
     this.#config = new ConfigManager()
     this.#r2 = new R2Client()
     this.#ui = new UIManager()
+    this.#details = new FileDetails({
+      onPreview: (item) => this.#openPreview(item),
+      onNavigate: (key) => void this.#explorer?.navigate(key),
+      onDownload: (key) => void this.#ops?.download(key),
+      onCopy: (key) => void this.#ops?.copyAs(key, 'path'),
+    })
 
     this.#ui.initTheme()
     this.#ui.initTooltip()
@@ -351,6 +360,7 @@ class App {
       this.#r2.init(this.#config)
       this.#updateThumbnailModeIndicator()
       this.#explorer = new FileExplorer(this.#r2, this.#ui)
+      this.#explorer.setOnDirectoryChange(() => this.#details.close())
       this.#upload = new UploadManager(this.#r2, this.#ui, this.#explorer, this.#config)
       this.#preview = new FilePreview(this.#r2, this.#ui)
       this.#ops = new FileOperations(this.#r2, this.#ui, this.#explorer)
