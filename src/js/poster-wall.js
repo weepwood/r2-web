@@ -351,8 +351,11 @@ class PosterWall {
     }
   }
 
-  #getVisualRects() {
-    return new Map([...this.#nodes].map(([key, node]) => [key, node.getBoundingClientRect()]))
+  /** @param {Set<number>|null} [blocks] */
+  #getVisualRects(blocks = null) {
+    return new Map([...this.#nodes]
+      .filter(([key]) => !blocks || blocks.has(this.#tileByKey.get(key)?.blockIndex ?? -1))
+      .map(([key, node]) => [key, node.getBoundingClientRect()]))
   }
 
   /** @param {Map<string,DOMRect>} [previous] */
@@ -460,7 +463,8 @@ class PosterWall {
     if (projectedRight < 0 || projectedBottom < 0 || projectedLeft > viewportWidth || projectedTop > viewportHeight) {
       return false
     }
-    const width = actions.offsetWidth || 220
+    // Avoid a synchronous layout read on every camera animation frame.
+    const width = 220
     const left = Math.max(14, Math.min(projectedRight - width, viewportWidth - width - 14))
     const top = Math.max(79, Math.min(projectedBottom + 10, viewportHeight - 76))
     actions.style.left = `${left}px`
@@ -533,10 +537,30 @@ class PosterWall {
   /** @param {string} key */
   #toggle(key) {
     if (!this.isOpen) return
-    const previous = this.#getVisualRects()
+    this.#cancelCameraMotion()
+    const oldBlock = this.#activeKey ? this.#tileByKey.get(this.#activeKey)?.blockIndex : null
+    const newBlock = this.#tileByKey.get(key)?.blockIndex
+    const blocks = new Set([oldBlock,newBlock].filter((value) => value !== null && value !== undefined))
+    // FLIP samples only the 7-8 cards in the affected geometric block(s),
+    // not every image on the wall.
+    const previous = this.#getVisualRects(blocks)
     this.#activeKey = this.#activeKey === key ? null : key
     this.#positions = focusReflow(this.#layout, this.#activeKey)
     this.#render(previous)
+
+    // Folia-like focus: the expanded picture settles towards the center
+    // while surrounding posters re-gear within their own block.
+    if (this.#activeKey) {
+      const rect = this.#positions.get(this.#activeKey)
+      if (rect) {
+        const { scale } = this.#camera
+        this.#animateCamera({
+          x: this.#viewport.clientWidth / 2 - (rect.x + rect.w / 2) * scale,
+          y: this.#viewport.clientHeight / 2 - (rect.y + rect.h / 2) * scale,
+          scale,
+        }, 420)
+      }
+    }
   }
 
   #updateHud() {
@@ -750,14 +774,23 @@ class PosterWall {
       const rect = this.#viewport.getBoundingClientRect()
       const x = event.clientX - rect.left
       const y = event.clientY - rect.top
-      if (event.shiftKey && !event.ctrlKey) {
-        this.#camera.x -= event.deltaY
-        this.#camera.y -= event.deltaX
-        this.#scheduleRender()
-      } else {
-        const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.0022 : 0.00125))
-        this.zoom(factor, x, y)
+      // Folia's wall treats ordinary wheel movement as navigation;
+      // Ctrl/trackpad pinch or Alt + wheel zooms around the pointer.
+      if (event.ctrlKey || event.altKey) {
+        this.zoom(Math.exp(-event.deltaY * 0.0022), x, y)
+        return
       }
+      const step = event.deltaMode === 1 ? 16
+        : event.deltaMode === 2 ? this.#viewport.clientHeight : 1
+      const dx = (event.shiftKey ? event.deltaY : event.deltaX) * step
+      const dy = (event.shiftKey ? 0 : event.deltaY) * step
+      const target = { ...this.#camera, x:this.#camera.x-dx, y:this.#camera.y-dy }
+      if (event.deltaMode === 0 && Math.abs(dx)+Math.abs(dy)<80) {
+        // Trackpads already emit smooth, high-rate deltas.
+        this.#cancelCameraMotion()
+        this.#camera = target
+        this.#scheduleRender()
+      } else this.#animateCamera(target, 210)
     }, { passive: false })
     // Controls live outside the viewport, so keyboard shortcuts must be scoped
     // to the entire presentation (including focused action buttons).
