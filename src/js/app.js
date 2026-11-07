@@ -335,6 +335,9 @@ class App {
       if (label) button.setAttribute('aria-label', label)
     })
 
+    $('#view-gallery-btn').dataset.tooltip = t('viewGallery')
+    $('#view-gallery-btn').setAttribute('aria-label', t('viewGallery'))
+    this.#details.updateLabels()
     this.#ui.initTooltip()
   }
 
@@ -451,10 +454,14 @@ class App {
 
   /** @param {string} view */
   #setView(view) {
-    $('#file-browser').dataset.view = view
-    $('#view-grid-btn').setAttribute('aria-pressed', String(view === 'grid'))
-    $('#view-list-btn').setAttribute('aria-pressed', String(view === 'list'))
-    localStorage.setItem(VIEW_KEY, view)
+    const next = ['grid', 'list', 'gallery'].includes(view) ? view : 'grid'
+    const previous = $('#file-browser').dataset.view
+    $('#file-browser').dataset.view = next
+    $('#view-grid-btn').setAttribute('aria-pressed', String(next === 'grid'))
+    $('#view-list-btn').setAttribute('aria-pressed', String(next === 'list'))
+    $('#view-gallery-btn').setAttribute('aria-pressed', String(next === 'gallery'))
+    if (previous !== next) this.#explorer?.refreshThumbnails()
+    localStorage.setItem(VIEW_KEY, next)
   }
 
   /** @param {string} density */
@@ -962,6 +969,7 @@ class App {
 
     $('#view-grid-btn').addEventListener('click', () => this.#setView('grid'))
     $('#view-list-btn').addEventListener('click', () => this.#setView('list'))
+    $('#view-gallery-btn').addEventListener('click', () => this.#setView('gallery'))
 
     $('#batch-delete-btn').addEventListener('click', async () => {
       const items = /** @type {FileExplorer} */ (this.#explorer).getSelection()
