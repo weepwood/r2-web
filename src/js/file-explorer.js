@@ -276,8 +276,8 @@ class FileExplorer {
         this.#ui.showEmptyState()
       } else {
         this.#ui.hideEmptyState()
-        this.#resetThumbnails()
-        $('#file-grid').innerHTML = ''
+        // Preserve existing image nodes on Load More so their loaded thumbnails
+        // and in-flight requests survive reordering into the newly sorted list.
         this.#renderItems(sorted)
         this.#restoreSelectionUI()
       }
@@ -348,14 +348,22 @@ class FileExplorer {
   /** @param {FileItem[]} items */
   #renderItems(items) {
     const grid = $('#file-grid')
+    const existingCards = new Map(
+      [...grid.querySelectorAll('.file-card')].map((node) => [
+        /** @type {HTMLElement} */ (node).dataset.key ?? '',
+        node,
+      ]),
+    )
     const frag = document.createDocumentFragment()
 
     for (const item of items) {
-      const card = this.#createFileCard(item)
+      // Reuse the same <img> node where possible rather than re-requesting
+      // thumbnails every time another R2 page becomes available.
+      const card = existingCards.get(item.key) ?? this.#createFileCard(item)
       frag.appendChild(card)
     }
 
-    grid.appendChild(frag)
+    grid.replaceChildren(frag)
   }
 
   /** @param {FileItem} item @returns {HTMLDivElement} */
