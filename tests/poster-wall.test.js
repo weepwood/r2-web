@@ -123,3 +123,26 @@ test('all four supported locales have PosterWall accessibility labels', () => {
     assert.equal([...i18n.matchAll(new RegExp('\\b'+key+':','g'))].length,4)
   }
 })
+
+test('every expanded mosaic position keeps at least a six-pixel gutter', () => {
+  const layout = buildWallLayout(fixtures.slice(0, 74))
+  for (const active of layout.slice(0, 36)) {
+    const positions = focusReflow(layout, active.key)
+    assert.equal(positions.size, layout.length)
+    for (let i = 0; i < layout.length; i++) {
+      const a = positions.get(layout[i].key)
+      for (let j = i + 1; j < layout.length; j++) {
+        const b = positions.get(layout[j].key)
+        const gap = WALL_GAP - 0.00001
+        const separated =
+          a.x + a.w + gap <= b.x ||
+          b.x + b.w + gap <= a.x ||
+          a.y + a.h + gap <= b.y ||
+          b.y + b.h + gap <= a.y
+        assert.equal(separated, true, `active=${active.key}: ${layout[i].key} and ${layout[j].key} overlap`)
+      }
+    }
+    const repeat = focusReflow(layout, active.key)
+    assert.deepEqual(positions, repeat, 'focus reflow must be deterministic')
+  }
+})
