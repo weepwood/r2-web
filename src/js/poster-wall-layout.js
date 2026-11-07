@@ -177,11 +177,27 @@ function centerDistance(a, b) {
 export function focusReflow(layout, activeKey) {
   const positions = new Map(layout.map(({key,x,y,w,h}) => [key,{x,y,w,h}]))
   if (!activeKey) return positions
+  const active = layout.find((tile) => tile.key === activeKey)
+  if (!active) return positions
+  const blockTiles = layout.filter((tile) => tile.blockIndex === active.blockIndex)
+  for (const [key, rect] of focusBlockReflow(blockTiles, activeKey)) positions.set(key, rect)
+  return positions
+}
 
-  const selected = layout.find((item) => item.key === activeKey)
+/**
+ * Compute only the selected 6x4 block. This is the hot path for changing
+ * focus; rebuilding the global rectangle map for 10k+ images is unnecessary.
+ *
+ * @param {WallTile[]} blockTiles
+ * @param {string} activeKey
+ * @returns {Map<string,{x:number,y:number,w:number,h:number}>}
+ */
+export function focusBlockReflow(blockTiles, activeKey) {
+  /** @type {Map<string,{x:number,y:number,w:number,h:number}>} */
+  const positions = new Map()
+  const selected = blockTiles.find((item) => item.key === activeKey)
   if (!selected) return positions
-  const block = selected.blockIndex
-  const neighbors = layout.filter((tile) => tile.blockIndex === block && tile.key !== activeKey)
+  const neighbors = blockTiles.filter((tile) => tile.key !== activeKey)
 
   const stride = WALL_CELL + WALL_GAP
   const originX = Math.floor(selected.x / (6*stride)) * 6*stride
