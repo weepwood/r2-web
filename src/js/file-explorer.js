@@ -1,6 +1,6 @@
 import { filesize } from 'filesize'
 import { IMAGE_RE } from './constants.js'
-import { getThumbnailMode, resolveThumbnailPolicy, selectThumbnailWidth } from './thumbnail-utils.js'
+import { ImageAssetService } from './image-asset-service.js'
 import { t } from './i18n.js'
 import { R2Client } from './r2-client.js'
 import { UIManager } from './ui-manager.js'
@@ -15,6 +15,8 @@ const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 class FileExplorer {
   /** @type {R2Client} */
   #r2
+  /** @type {ImageAssetService} */
+  #images
   /** @type {UIManager} */
   #ui
   #prefix = ''
@@ -50,6 +52,7 @@ class FileExplorer {
   /** @param {R2Client} r2 @param {UIManager} ui */
   constructor(r2, ui) {
     this.#r2 = r2
+    this.#images = new ImageAssetService(r2)
     this.#ui = ui
 
     this.#thumbnailObserver = new IntersectionObserver(
@@ -541,11 +544,9 @@ class FileExplorer {
       })
 
     try {
-      const publicUrl = this.#r2.getPublicUrl(key)
       const browserDpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio
       const displayWidth = $('#file-browser').dataset.view === 'list' ? 64 : Math.min(card.clientWidth, 260)
-      const width = selectThumbnailWidth(displayWidth, browserDpr)
-      const policy = resolveThumbnailPolicy({ publicUrl, key, mode: getThumbnailMode(), width })
+      const policy = this.#images.thumbnailPlan(key, displayWidth, browserDpr)
 
       if (!policy.url && !policy.allowOriginal) {
         card.classList.add('thumbnail-unavailable')
@@ -556,7 +557,7 @@ class FileExplorer {
       let loaded = false
       if (policy.url) loaded = await load(policy.url)
       if (!loaded && policy.allowOriginal && isCurrent()) {
-        const original = publicUrl ?? (await this.#r2.getPresignedUrl(key))
+        const original = await this.#images.originalUrl(key)
         if (isCurrent()) loaded = await load(original)
       }
 
