@@ -569,8 +569,11 @@ class PosterWall {
   #updateHud() {
     const count = document.querySelector('#wall-count')
     const zoom = document.querySelector('#wall-zoom-value')
-    if (count) count.textContent = t('wallCount', { count: this.#items.length })
-    if (zoom) zoom.textContent = Math.round(this.#camera.scale * 100) + '%'
+    const countLabel = t('wallCount', { count: this.#items.length })
+    const zoomLabel = Math.round(this.#camera.scale * 100) + '%'
+    // Avoid changing text nodes and invalidating layout on every pan frame.
+    if (count && count.textContent !== countLabel) count.textContent = countLabel
+    if (zoom && zoom.textContent !== zoomLabel) zoom.textContent = zoomLabel
   }
 
   /** @param {string} key */
