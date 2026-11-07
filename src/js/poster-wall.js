@@ -3,6 +3,7 @@ import { ImageAssetService } from './image-asset-service.js'
 import { extractFileName } from './utils.js'
 import { t } from './i18n.js'
 import { buildWallLayout, cameraBounds, focusReflow, intersects, preserveTileAnchor, zoomAt } from './poster-wall-layout.js'
+import { indexWallTiles, queryWallTiles } from './poster-wall-visibility.js'
 
 /** @typedef {{key:string,size?:number,lastModified?:number|string}} ImageItem */
 /** @typedef {{key:string,node:HTMLButtonElement,img:HTMLImageElement,cancel:()=>void,active:boolean,stopped:boolean,requestedWidth:number}} ImageTask */
@@ -32,6 +33,11 @@ class PosterWall {
   #tileByKey = new Map()
   /** @type {ReturnType<typeof focusReflow>} */
   #positions = new Map()
+  /** @type {ReturnType<typeof indexWallTiles>} */
+  #blocks = new Map()
+  /** @type {{x:number,y:number,w:number,h:number}|null} */
+  #committedBounds = null
+  #entranceWave = false
   /** @type {Map<string,HTMLButtonElement>} */
   #nodes = new Map()
   /** @type {Map<string,ImageTask>} */
@@ -146,12 +152,15 @@ class PosterWall {
       sibling.inert = true
     }
     this.#columnCount = this.#viewport.clientWidth < 760 ? 2 : 3
+    this.#committedBounds = null
+    this.#entranceWave = !this.#reducedMotion
     this.#items = items
     this.#hasMore = hasMore
     this.#activeKey = null
     this.#recalculate()
     this.resetCamera()
     this.#render()
+    this.#entranceWave = false
     this.#viewport.focus({ preventScroll: true })
   }
 
@@ -174,6 +183,8 @@ class PosterWall {
     this.#backgroundInert.clear()
     if (this.#renderFrame) cancelAnimationFrame(this.#renderFrame)
     this.#renderFrame = 0
+    this.#committedBounds = null
+    this.#entranceWave = false
     window.clearTimeout(this.#qualityTimer)
     this.#qualityTimer = 0
     this.#lastQualityScale = 0
@@ -219,6 +230,7 @@ class PosterWall {
   #recalculate() {
     this.#layout = buildWallLayout(this.#items, { columns: this.#columnCount })
     this.#tileByKey = new Map(this.#layout.map((tile) => [tile.key, tile]))
+    this.#blocks = indexWallTiles(this.#layout)
     this.#positions = focusReflow(this.#layout, this.#activeKey)
   }
 
@@ -298,12 +310,45 @@ class PosterWall {
     this.#cameraFrame = requestAnimationFrame(tick)
   }
 
+  /**
+   * Camera frames only touch the GPU transform and a tiny HUD. They do not
+   * scan, sort or allocate the tile DOM on every mouse move / touch frame.
+   * The cached cull box reserves 380px around the visible viewport; refresh
+   * it only when the visible rectangle approaches the edge of that reserve.
+   */
   #scheduleRender() {
     if (!this.isOpen || this.#renderFrame) return
     this.#renderFrame = requestAnimationFrame(() => {
       this.#renderFrame = 0
-      this.#render()
+      this.#paintCamera()
+      const bounds = this.#committedBounds
+      const visible = cameraBounds(this.#camera,
+        this.#viewport.clientWidth, this.#viewport.clientHeight, 0)
+      const margin = 110 / this.#camera.scale
+      if (!bounds ||
+        visible.x < bounds.x + margin ||
+        visible.y < bounds.y + margin ||
+        visible.x + visible.w > bounds.x + bounds.w - margin ||
+        visible.y + visible.h > bounds.y + bounds.h - margin) {
+        this.#render()
+      }
     })
+  }
+
+  #paintCamera() {
+    const { x, y, scale } = this.#camera
+    this.#canvas.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${scale})`
+    const zoomLevel = scale < 0.58 ? 'overview' : scale > 1.45 ? 'detail' : 'normal'
+    if (this.#root.dataset.zoomLevel !== zoomLevel) this.#root.dataset.zoomLevel = zoomLevel
+    if (Math.abs(this.#lastQualityScale - scale) >= 0.025) {
+      this.#lastQualityScale = scale
+      this.#scheduleQualityCheck()
+    }
+    this.#updateHud()
+    if (this.#activeKey) {
+      const actions = /** @type {HTMLElement} */ (document.querySelector('#wall-focus-actions'))
+      actions.hidden = !this.#positionFocusActions(actions)
+    }
   }
 
   #getVisualRects() {
@@ -313,28 +358,36 @@ class PosterWall {
   /** @param {Map<string,DOMRect>} [previous] */
   #render(previous) {
     if (!this.isOpen) return
-    const { x, y, scale } = this.#camera
-    this.#canvas.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${scale})`
-    // At overview zoom, typography withdraws so the photographs read as one
-    // continuous mosaic. Hover, keyboard focus and selection still reveal it.
-    const zoomLevel = scale < 0.58 ? 'overview' : scale > 1.45 ? 'detail' : 'normal'
-    if (this.#root.dataset.zoomLevel !== zoomLevel) this.#root.dataset.zoomLevel = zoomLevel
-    const bounds = cameraBounds(this.#camera, this.#viewport.clientWidth, this.#viewport.clientHeight)
-    const visible = new Set()
-    for (const tile of this.#layout) {
+    this.#paintCamera()
+    const { scale } = this.#camera
+    const bounds = cameraBounds(this.#camera, this.#viewport.clientWidth,
+      this.#viewport.clientHeight, 380)
+    this.#committedBounds = bounds
+    const candidates = queryWallTiles(this.#blocks, this.#positions, bounds)
+    const visible = new Set(candidates.map((tile) => tile.key))
+    for (const tile of candidates) {
       const rect = this.#positions.get(tile.key)
-      if (!rect || !intersects(rect, bounds)) continue
-      visible.add(tile.key)
+      if (!rect) continue
       let node = this.#nodes.get(tile.key)
       if (!node) {
         node = this.#createTile(tile)
         this.#nodes.set(tile.key, node)
         this.#canvas.append(node)
         this.#enqueueImage(tile, node)
+        if (this.#entranceWave) {
+          const screenX = tile.x * scale + this.#camera.x
+          const screenY = tile.y * scale + this.#camera.y
+          const delay = Math.min(290, Math.max(0, (screenX + screenY) * 0.11))
+          node.style.setProperty('--wall-entrance-delay', delay + 'ms')
+          node.classList.add('is-entering')
+          node.addEventListener('animationend', () => node.classList.remove('is-entering'), { once:true })
+        }
       }
-      // An interrupted spring starts at the tile's current visual location.
-      if (previous?.has(tile.key)) node.getAnimations().forEach((animation) => animation.cancel())
       const layoutId = `${rect.x},${rect.y},${rect.w},${rect.h}`
+      // Only the actually reconfigured block needs to interrupt FLIP.
+      if (node.dataset.layoutRect !== layoutId && previous?.has(tile.key)) {
+        node.getAnimations().forEach((animation) => animation.cancel())
+      }
       if (node.dataset.layoutRect !== layoutId) {
         node.dataset.layoutRect = layoutId
         node.style.left = `${rect.x}px`
@@ -377,11 +430,6 @@ class PosterWall {
     this.#imageQueue = this.#imageQueue.filter((task) => !task.stopped)
     this.#imageQueue.sort((a, b) => this.#imagePriority(a.key) - this.#imagePriority(b.key))
     this.#pumpImages()
-    if (Math.abs(this.#lastQualityScale - scale) >= 0.025) {
-      this.#lastQualityScale = scale
-      this.#scheduleQualityCheck()
-    }
-
     this.#root.classList.toggle('has-active', Boolean(this.#activeKey))
     const focusActions = /** @type {HTMLElement} */ (document.querySelector('#wall-focus-actions'))
     const emptyState = /** @type {HTMLElement} */ (document.querySelector('#wall-empty'))
