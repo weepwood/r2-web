@@ -33,6 +33,9 @@ class FileExplorer {
   #onSelectionChange = null
   /** @type {(() => void) | null} */
   #onDirectoryChange = null
+  /** @type {((items:{key:string,size:number,lastModified:number}[],hasMore:boolean)=>void)|null} */
+  #onItemsChange = null
+  #thumbnailsSuspended = false
   #loadGen = 0
   #loadingPageGeneration = -1
   #filterQuery = ''
@@ -86,6 +89,45 @@ class FileExplorer {
   /** @param {() => void} cb */
   setOnDirectoryChange(cb) {
     this.#onDirectoryChange = cb
+  }
+
+  /**
+   * Only the images already loaded by paginated R2 listing are available to
+   * PosterWall. This never triggers an extra object-listing request.
+   * @returns {{key:string,size:number,lastModified:number}[]}
+   */
+  getWallItems() {
+    return this.#sortItems(this.#loadedItems)
+      .filter((item) => !item.isFolder && IMAGE_RE.test(item.key))
+      .filter((item) => !this.#filterQuery || extractFileName(item.key).toLocaleLowerCase().includes(this.#filterQuery))
+      .map((item) => ({
+        key: item.key,
+        size: item.size ?? 0,
+        lastModified: item.lastModified ? new Date(item.lastModified).getTime() : 0,
+      }))
+  }
+
+  get hasMore() {
+    return Boolean(this.#continuationToken)
+  }
+
+  /** @param {(items:{key:string,size:number,lastModified:number}[],hasMore:boolean)=>void} callback */
+  setOnItemsChange(callback) {
+    this.#onItemsChange = callback
+  }
+
+  /** @param {boolean} paused */
+  suspendThumbnails(paused) {
+    if (paused === this.#thumbnailsSuspended) return
+    this.#thumbnailsSuspended = paused
+    this.#resetThumbnails()
+    if (!paused) {
+      document.querySelectorAll('#file-grid .file-card:not([hidden])').forEach((card) => {
+        if (card.querySelector('.file-card-thumb:not(.loaded)')) {
+          this.#thumbnailObserver.observe(card)
+        }
+      })
+    }
   }
 
   /** @returns {SelectionItem[]} */
@@ -178,6 +220,7 @@ class FileExplorer {
         ? t('itemsPartial', { count: this.#loadedItems.length })
         : t('itemsTotal', { count: this.#loadedItems.length })
     countEl.hidden = this.#loadedItems.length === 0
+    this.#onItemsChange?.(this.getWallItems(), this.hasMore)
   }
 
   /** Re-render only thumbnails when the local user preference changes. */
@@ -428,7 +471,7 @@ class FileExplorer {
     nameEl.textContent = name
     nameEl.setAttribute('title', name)
 
-    if (isImage) {
+    if (isImage && !this.#thumbnailsSuspended) {
       this.#thumbnailObserver.observe(card)
     }
 
