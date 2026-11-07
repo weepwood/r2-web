@@ -1,5 +1,5 @@
 import { getThumbnailMode, resolveThumbnailPolicy, selectThumbnailWidth } from './thumbnail-utils.js'
-import { R2Client } from './r2-client.js'
+/** @typedef {import('./r2-client.js').R2Client} R2Client */
 
 /**
  * Single point for deciding which image resource can be requested.
