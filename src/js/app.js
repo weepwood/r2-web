@@ -247,6 +247,7 @@ class App {
     )
     $('#upload-panel-progress').setAttribute('aria-label', t('uploadOverallProgress'))
     $('#load-more-btn').textContent = t('loadMore')
+    $('#load-more-hint').textContent = t('loadMoreHint')
     const filterInput = /** @type {HTMLInputElement} */ ($('#file-filter-input'))
     filterInput.placeholder = t('filterPlaceholder')
     filterInput.setAttribute('aria-label', t('filterPlaceholder'))
