@@ -18,6 +18,7 @@ import { FileOperations } from './file-operations.js'
 import { FilePreview } from './file-preview.js'
 import { UploadManager } from './upload-manager.js'
 import { R2Client } from './r2-client.js'
+import { getThumbnailMode, setThumbnailMode } from './thumbnail-utils.js'
 import { UIManager } from './ui-manager.js'
 import { getCurrentLang, setLang, t } from './i18n.js'
 import { $, getErrorMessage } from './utils.js'
@@ -126,6 +127,17 @@ class App {
     $('#lbl-language').textContent = t('lblLanguage')
 
     $('#lbl-density').textContent = t('lblDensity')
+    $('#lbl-thumbnail-mode').textContent = t('thumbnailModeLabel')
+    $('#thumbnail-mode-hint').textContent = t('thumbnailHint')
+    for (const [mode, key] of [
+      ['auto', 'thumbnailAuto'],
+      ['strict', 'thumbnailStrict'],
+      ['original', 'thumbnailOriginal'],
+    ]) {
+      const option = /** @type {HTMLOptionElement | null} */ (document.querySelector(`#cfg-thumbnail-mode option[value="${mode}"]`))
+      if (option) option.textContent = t(/** @type {any} */ (key))
+    }
+    this.#updateThumbnailModeIndicator()
     const densitySelect = $('#cfg-density')
     if (densitySelect) {
       $('option[value="compact"]', densitySelect).textContent = t('densityCompact')
@@ -316,9 +328,27 @@ class App {
     this.#ui.initTooltip()
   }
 
+  #updateThumbnailModeIndicator() {
+    const indicator = $('#thumbnail-mode-indicator')
+    const mode = getThumbnailMode()
+    const cfg = this.#config.get()
+    const publicDomain = cfg.bucketAccess !== 'private' && Boolean(cfg.customDomain)
+    indicator.hidden = false
+    indicator.textContent =
+      mode === 'original'
+        ? t('thumbnailIndicatorOriginal')
+        : mode === 'strict'
+          ? t('thumbnailIndicatorStrict')
+          : publicDomain
+            ? t('thumbnailIndicatorCDN')
+            : t('thumbnailIndicatorPrivate')
+    indicator.title = t('thumbnailHint')
+  }
+
   async #connectAndLoad() {
     try {
       this.#r2.init(this.#config)
+      this.#updateThumbnailModeIndicator()
       this.#explorer = new FileExplorer(this.#r2, this.#ui)
       this.#upload = new UploadManager(this.#r2, this.#ui, this.#explorer, this.#config)
       this.#preview = new FilePreview(this.#r2, this.#ui)
@@ -507,6 +537,7 @@ class App {
     const themeInput = /** @type {HTMLSelectElement | null} */ ($('#cfg-theme'))
     const languageInput = /** @type {HTMLSelectElement | null} */ ($('#cfg-language'))
     const densityInput = /** @type {HTMLSelectElement | null} */ ($('#cfg-density'))
+    const thumbnailModeInput = /** @type {HTMLSelectElement} */ ($('#cfg-thumbnail-mode'))
 
     const cfg = this.#config.get()
     const accountInput = /** @type {HTMLInputElement} */ ($('#cfg-account-id'))
@@ -530,6 +561,7 @@ class App {
     if (themeInput) themeInput.value = currentTheme
     if (languageInput) languageInput.value = savedLang
     if (densityInput) densityInput.value = currentDensityValue
+    thumbnailModeInput.value = getThumbnailMode()
 
     if (cfg.accountId) accountInput.value = cfg.accountId
     if (cfg.accessKeyId) accessInput.value = cfg.accessKeyId
@@ -593,6 +625,9 @@ class App {
       if (newDensity !== currentDensityValue) {
         this.#setDensity(newDensity)
       }
+
+      const newThumbnailMode = /** @type {'auto' | 'strict' | 'original'} */ (thumbnailModeInput.value)
+      if (newThumbnailMode !== getThumbnailMode()) setThumbnailMode(newThumbnailMode)
 
       this.#config.save({
         accountId: accountInput.value.trim(),
