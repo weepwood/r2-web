@@ -81,12 +81,12 @@ class R2Client {
       isFolder: true,
     }))
 
-    /** @type {FileItem[]} */
     const contents = [...doc.querySelectorAll('Contents')]
     // A CommonPrefix is virtual. Only a matching Contents/Key represents
     // an actual folder-marker object, which can safely be copied/deleted.
     const hasFolderMarker = Boolean(prefix) && contents.some((el) =>
       el.querySelector('Key')?.textContent === prefix)
+    /** @type {FileItem[]} */
     const files = contents
       .map((el) => ({
         key: el.querySelector('Key')?.textContent ?? '',
