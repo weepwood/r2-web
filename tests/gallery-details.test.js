@@ -53,3 +53,19 @@ test('four locale labels and responsive drawer styles are present', () => {
   assert.match(css, /\.details-panel:not\(\[hidden\]\)/)
   assert.match(css, /\.details-backdrop:not\(\[hidden\]\)/)
 })
+
+test('loading another R2 page retains existing cards and loaded thumbnails', () => {
+  assert.match(explorer, /const existingCards = new Map\(/)
+  assert.match(explorer, /existingCards\.get\(item\.key\) \?\? this\.#createFileCard\(item\)/)
+  assert.match(explorer, /grid\.replaceChildren\(frag\)/)
+  assert.doesNotMatch(
+    explorer,
+    /const sorted = this\.#sortItems\(this\.#loadedItems\)[\s\S]{0,250}this\.#resetThumbnails\(\)/,
+  )
+})
+
+test('details panel switches static icons by type and safely escapes file names', () => {
+  assert.match(details, /getFileIconSvg\(/)
+  assert.match(details, /\$\('#details-filename'\)\.textContent = extractFileName\(item\.key\)/)
+  assert.match(details, /art\.dataset\.type = item\.isFolder \? 'folder' : item\.type/)
+})
