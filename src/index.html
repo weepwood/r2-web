@@ -140,6 +140,19 @@
                   </select>
                 </div>
               </div>
+              <div class="config-section thumbnail-preferences">
+                <div class="field">
+                  <div class="field-label">
+                    <label for="cfg-thumbnail-mode" id="lbl-thumbnail-mode">图片加载策略</label>
+                  </div>
+                  <select id="cfg-thumbnail-mode" name="thumbnailMode">
+                    <option value="auto">智能小图（推荐）</option>
+                    <option value="strict">严格省流量（不回退原图）</option>
+                    <option value="original">兼容模式（原图）</option>
+                  </select>
+                  <p class="field-hint" id="thumbnail-mode-hint">公开自定义域名可使用 Cloudflare 图片缩放；私有存储桶需要单独的受保护缩略图服务。</p>
+                </div>
+              </div>
             </form>
 
             <!-- Tab 2: R2 Config -->
@@ -649,6 +662,7 @@
             </svg>
           </button>
           <small class="text-secondary" id="item-count" hidden></small>
+          <span class="thumbnail-mode-indicator" id="thumbnail-mode-indicator" hidden></span>
         </div>
         <div class="toolbar-search" role="search">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
