@@ -66,3 +66,23 @@ export function focusedWallCamera(camera, tile, viewWidth, viewHeight) {
     scale,
   }
 }
+
+/**
+ * A very short pointer-release coast. Ignore stale or slow release samples;
+ * strong swipes receive a bounded distance rather than an infinite glide.
+ *
+ * @param {number} velocityX screen pixels per second
+ * @param {number} velocityY screen pixels per second
+ * @param {number} idleMs milliseconds since the last pointer movement
+ * @returns {{x:number,y:number}|null}
+ */
+export function projectWallCoast(velocityX, velocityY, idleMs) {
+  if (idleMs > 85 || idleMs < 0) return null
+  const speed = Math.hypot(velocityX,velocityY)
+  if (speed < 165) return null
+  const distance = Math.min(260, speed * .115)
+  return {
+    x: velocityX / speed * distance,
+    y: velocityY / speed * distance,
+  }
+}
