@@ -295,6 +295,12 @@ class App {
     $('#batch-delete-text').textContent = t('delete')
     $('#batch-toggle-text').textContent = t(this.#batchMode ? 'exitBatchMode' : 'batchMode')
 
+    $('#batch-cancel-btn').setAttribute('aria-label', t('cancel'))
+    document.querySelectorAll('button.icon-btn[data-tooltip]').forEach((button) => {
+      const label = /** @type {HTMLElement} */ (button).dataset.tooltip
+      if (label) button.setAttribute('aria-label', label)
+    })
+
     this.#ui.initTooltip()
   }
 
@@ -451,17 +457,37 @@ class App {
       tabButtons.forEach((btn) => {
         const isActive = btn.dataset.tab === tabId
         btn.setAttribute('aria-selected', String(isActive))
+        btn.tabIndex = isActive ? 0 : -1
       })
       tabPanels.forEach((panel) => {
         panel.hidden = panel.dataset.panel !== tabId
       })
     }
 
-    tabButtons.forEach((btn) => {
-      btn.addEventListener('click', () => {
+    tabButtons.forEach((btn, index) => {
+      // Reassign handlers each open so reopening Settings never duplicates listeners.
+      btn.onclick = () => {
         const tabId = btn.dataset.tab
         if (tabId) switchTab(tabId)
-      })
+      }
+      btn.onkeydown = (event) => {
+        const next = {
+          ArrowRight: 1,
+          ArrowDown: 1,
+          ArrowLeft: -1,
+          ArrowUp: -1,
+        }[/** @type {'ArrowRight'|'ArrowDown'|'ArrowLeft'|'ArrowUp'} */ (event.key)]
+        let targetIndex
+        if (event.key === 'Home') targetIndex = 0
+        else if (event.key === 'End') targetIndex = tabButtons.length - 1
+        else if (next) targetIndex = (index + next + tabButtons.length) % tabButtons.length
+        else return
+        event.preventDefault()
+        const target = tabButtons[targetIndex]
+        const tabId = target.dataset.tab
+        if (tabId) switchTab(tabId)
+        target.focus()
+      }
     })
 
     switchTab(defaultTab)
