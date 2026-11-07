@@ -3,6 +3,7 @@ import { LANG_KEY } from './constants.js'
 const I18N = {
   zh: {
     appTitle: 'R2 Web',
+    folderInsideItself: '不能将文件夹复制或移动到它自身或其子目录中',
     viewWall: '沉浸式展示墙',
     wallEyebrow: 'R2 · 视觉档案',
     wallTitle: '无限画布',
@@ -302,6 +303,7 @@ const I18N = {
   },
   zh_TW: {
     appTitle: 'R2 Web',
+    folderInsideItself: '無法將資料夾複製或移動到自身或子目錄中',
     viewWall: '沉浸式展示牆',
     wallEyebrow: 'R2 · 視覺檔案',
     wallTitle: '無限畫布',
@@ -601,6 +603,7 @@ const I18N = {
   },
   en: {
     appTitle: 'R2 Web',
+    folderInsideItself: 'A folder cannot be copied or moved into itself or a descendant',
     viewWall: 'Immersive Poster Wall',
     wallEyebrow: 'R2 · VISUAL ARCHIVE',
     wallTitle: 'Infinite Canvas',
@@ -904,6 +907,7 @@ const I18N = {
   },
   ja: {
     appTitle: 'R2 Web',
+    folderInsideItself: 'フォルダーを自身またはそのサブフォルダーにコピー・移動できません',
     viewWall: '没入型ポスターウォール',
     wallEyebrow: 'R2 · ビジュアルアーカイブ',
     wallTitle: '無限キャンバス',
