@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  classifyWallWheel, stepWheelDamping, focusedWallCamera,
+  classifyWallWheel, stepWheelDamping, focusedWallCamera, projectWallCoast,
 } from '../src/js/poster-wall-motion.js'
 import {
   buildWallLayout, focusBlockReflow, focusReflow, WALL_GAP,
@@ -81,4 +81,16 @@ test('block-only focus equals the global focus result, without scanning distant 
       assert.deepEqual(comparison.get(tile.key),base.get(tile.key))
     }
   }
+})
+
+test('drag release coasts only for fresh, substantial movement, with a strict cap',()=>{
+  assert.equal(projectWallCoast(70,20,0),null)
+  assert.equal(projectWallCoast(1200,0,120),null)
+  assert.equal(projectWallCoast(1200,0,-1),null)
+  const slow=projectWallCoast(450,0,15)
+  assert.ok(slow.x>0 && slow.x<70)
+  assert.equal(slow.y,0)
+  const diagonal=projectWallCoast(3500,-3500,0)
+  assert.ok(Math.hypot(diagonal.x,diagonal.y)<=260.00001)
+  assert.ok(diagonal.x>0&&diagonal.y<0)
 })
