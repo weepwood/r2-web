@@ -211,6 +211,34 @@ try {
     // the camera after panning the large synthetic gallery.
     await cdp.evaluate(`document.querySelector('#wall-reset').click()`)
     await pause(350)
+
+    // Three discrete wheel notches must retain the entire requested distance.
+    // Previously each event restarted a tween and silently lost displacement.
+    const wheelMotion = await cdp.evaluate(`(async () => {
+      const viewport = document.querySelector('#poster-wall-viewport')
+      const cameraY = () => {
+        const match = viewport.querySelector('#poster-wall-canvas').style.transform
+          .match(/translate3d\\([^,]+,\\s*([0-9.+-]+)px,/)
+        return match ? Number(match[1]) : NaN
+      }
+      await new Promise(resolve => setTimeout(resolve,170))
+      const start=cameraY()
+      for(let i=0;i<3;i++){
+        viewport.dispatchEvent(new WheelEvent('wheel',{
+          bubbles:true,cancelable:true,deltaMode:0,deltaY:100
+        }))
+        await new Promise(resolve => setTimeout(resolve,27))
+      }
+      await new Promise(resolve => setTimeout(resolve,950))
+      return {start,end:cameraY()}
+    })()`)
+    assert.ok(Number.isFinite(wheelMotion.start) && Number.isFinite(wheelMotion.end),
+      'wheel camera coordinates must be finite')
+    assert.ok(Math.abs(wheelMotion.end - wheelMotion.start + 300) < 9,
+      `Three discrete wheel steps should pan 300px, got ${wheelMotion.end-wheelMotion.start}`)
+    console.log(`Wheel continuity: three notches moved ${(wheelMotion.end-wheelMotion.start).toFixed(1)}px`)
+    await cdp.evaluate(`document.querySelector('#wall-reset').click()`)
+    await pause(350)
   }
 
   // The HTML hidden property alone is insufficient: display:flex/grid rules
