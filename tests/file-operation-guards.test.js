@@ -42,7 +42,8 @@ test('移动和批量复制移动都对目标目录执行冲突检测', () => {
 test('CopyObject 检测 HTTP 200 内嵌错误码，复制成功前不删除源数据', () => {
   const client = readFileSync(new URL('../src/js/r2-client.js', import.meta.url), 'utf8')
   const operations = readFileSync(new URL('../src/js/file-operations.js', import.meta.url), 'utf8')
-  assert.match(client, /document\.querySelector\('Error > Code'\)\?\.textContent/)
+  assert.ok(client.includes("xml.querySelector('Error > Code')?.textContent"))
   assert.match(client, /if \(code\) throw new Error\('R2_COPY_' \+ code\)/)
+  assert.ok(client.includes('await this.#assertCopyResponse(res)'))
   assert.match(operations, /await this\.#r2\.copyObject\(key, dest\)\s*await this\.#r2\.deleteObject\(key\)/)
 })
