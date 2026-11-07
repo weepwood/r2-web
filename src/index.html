@@ -835,6 +835,14 @@
                 <path d="m4 18 5.5-6 4 4 2.8-3 4.7 5" />
               </svg>
             </button>
+            <button type="button" class="icon-btn sm" id="view-wall-btn" aria-pressed="false" data-tooltip="展示墙" aria-label="展示墙" title="展示墙">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true">
+                <rect x="2.8" y="2.8" width="8" height="11" />
+                <rect x="12.8" y="2.8" width="8.4" height="6" />
+                <rect x="2.8" y="15.8" width="8" height="5.4" />
+                <rect x="12.8" y="10.8" width="8.4" height="10.4" />
+              </svg>
+            </button>
           </div>
 
           <div class="btn-group sort-toggle" role="group" aria-label="切换排序">
@@ -1108,6 +1116,57 @@
         </div>
       </aside>
       </div>
+
+      <!-- Immersive PosterWall: a distinct, fully virtualized canvas layer. -->
+      <section id="poster-wall" class="poster-wall" role="region" aria-label="图片展示墙" hidden>
+        <div id="poster-wall-viewport" class="poster-wall-viewport" tabindex="0" aria-label="图片画布：拖拽平移，滚轮缩放，方向键移动">
+          <div id="poster-wall-canvas" class="poster-wall-canvas"></div>
+        </div>
+        <header class="poster-wall-header">
+          <div id="wall-eyebrow" class="poster-wall-eyebrow">R2 · VISUAL ARCHIVE</div>
+          <h2 id="wall-title">Infinite Canvas</h2>
+        </header>
+        <div class="poster-wall-controls">
+          <button id="wall-close" type="button" class="poster-wall-fab" aria-label="退出展示墙" title="退出展示墙">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div class="poster-wall-controls poster-wall-controls-bottom">
+          <button id="wall-zoom-out" type="button" class="poster-wall-fab" aria-label="缩小" title="缩小">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+              <circle cx="11" cy="11" r="8"/><path d="M7 11h8"/>
+            </svg>
+          </button>
+          <button id="wall-reset" type="button" class="poster-wall-fab" aria-label="重置视角" title="重置视角">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+              <path d="M3 11a9 9 0 1 1 2.7 6.4"/><path d="M3 4v7h7"/>
+            </svg>
+          </button>
+          <button id="wall-zoom-in" type="button" class="poster-wall-fab" aria-label="放大" title="放大">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+              <circle cx="11" cy="11" r="8"/><path d="M7 11h8M11 7v8"/>
+            </svg>
+          </button>
+        </div>
+        <div class="poster-wall-hud">
+          <span id="wall-count" aria-live="polite">0 images</span>
+          <b id="wall-zoom-value">76%</b>
+          <span id="wall-help">拖动 · 滚轮缩放 · Esc 退出</span>
+        </div>
+        <div id="wall-focus-actions" class="poster-wall-focus-actions" hidden>
+          <button type="button" id="wall-preview" class="poster-wall-action">预览原图</button>
+          <button type="button" id="wall-collapse" class="poster-wall-action">收起</button>
+        </div>
+        <div id="wall-more" class="poster-wall-more" hidden>
+          <button type="button" class="poster-wall-action" id="wall-load-more">加载更多图片</button>
+        </div>
+        <div id="wall-empty" class="poster-wall-empty" hidden>
+          <strong id="wall-empty-title">此目录暂无图片</strong>
+          <span id="wall-empty-hint">可返回文件管理器选择其他目录</span>
+        </div>
+      </section>
     </div>
 
     <!-- Preview Dialog -->
