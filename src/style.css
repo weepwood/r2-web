@@ -15,6 +15,7 @@
 @import './css/animations.css';
 @import './bucket-manager.css';
 @import './smooth-bucket-switch.css';
+@import './css/refinements.css';
 
 /* ========================================================================
    Global Tooltip — Outside layers for maximum priority
