@@ -4,6 +4,7 @@ import { extractFileName } from './utils.js'
 import { t } from './i18n.js'
 import { buildWallLayout, cameraBounds, focusBlockReflow, focusReflow, intersects, preserveTileAnchor, zoomAt } from './poster-wall-layout.js'
 import { indexWallTiles, queryWallTiles } from './poster-wall-visibility.js'
+import { classifyWallWheel, focusedWallCamera, stepWheelDamping } from './poster-wall-motion.js'
 
 /** @typedef {{key:string,size?:number,lastModified?:number|string}} ImageItem */
 /** @typedef {{key:string,node:HTMLButtonElement,img:HTMLImageElement,cancel:()=>void,active:boolean,stopped:boolean,requestedWidth:number}} ImageTask */
@@ -56,6 +57,11 @@ class PosterWall {
   #hasMore = false
   #renderFrame = 0
   #cameraFrame = 0
+  #wheelFrame = 0
+  #wheelTime = 0
+  #wheelPending = { x: 0, y: 0 }
+  #wheelLastEvent = 0
+  #wheelPrecise = false
   #reducedMotion = false
   #pinchDistance = 0
   #lastPinchCenter = { x: 0, y: 0 }
@@ -108,6 +114,7 @@ class PosterWall {
     if (previousSize.width === width && previousSize.height === height) return
     this.#viewportSize = { width, height }
     this.#cancelCameraMotion()
+    this.#cancelWheelMotion()
     // Keep the midpoint of the current viewport steady on ordinary resizes.
     this.#camera.x += (width - previousSize.width) / 2
     this.#camera.y += (height - previousSize.height) / 2
@@ -191,6 +198,7 @@ class PosterWall {
     this.#qualityTimer = 0
     this.#lastQualityScale = 0
     this.#cancelCameraMotion()
+    this.#cancelWheelMotion()
     this.#pointers.clear()
     this.#gestureUsedPinch = false
     this.#pointerTile = null
@@ -244,6 +252,7 @@ class PosterWall {
 
   /** @param {boolean} [animated] */
   resetCamera(animated = false) {
+    this.#cancelWheelMotion()
     const width = this.#viewport.clientWidth || window.innerWidth
     const height = this.#viewport.clientHeight || window.innerHeight
     const defaultScale = width < 640 ? 0.54 : width < 1100 ? 0.66 : 0.76
@@ -275,6 +284,7 @@ class PosterWall {
 
   /** @param {number} factor @param {number} [x] @param {number} [y] @param {boolean} [animated] */
   zoom(factor, x = this.#viewport.clientWidth / 2, y = this.#viewport.clientHeight / 2, animated = false) {
+    this.#cancelWheelMotion()
     const target = zoomAt(this.#camera, x, y, this.#camera.scale * factor)
     if (animated) this.#animateCamera(target, 235)
     else {
@@ -289,12 +299,44 @@ class PosterWall {
     this.#cameraFrame = 0
   }
 
+  #cancelWheelMotion() {
+    if (this.#wheelFrame) cancelAnimationFrame(this.#wheelFrame)
+    this.#wheelFrame = 0
+    this.#wheelTime = 0
+    this.#wheelPending = {x:0,y:0}
+  }
+
+  /** @param {number} dx @param {number} dy */
+  #moveWheel(dx,dy) {
+    this.#cancelCameraMotion()
+    this.#wheelPending.x -= dx
+    this.#wheelPending.y -= dy
+    if (this.#wheelFrame) return
+    /** @param {number} now */
+    const tick = (now) => {
+      this.#wheelFrame = 0
+      if (!this.isOpen) { this.#cancelWheelMotion(); return }
+      const dt = this.#wheelTime ? now-this.#wheelTime : 16
+      this.#wheelTime = now
+      const motion = stepWheelDamping(this.#wheelPending,dt)
+      this.#wheelPending = motion.pending
+      this.#camera.x += motion.step.x
+      this.#camera.y += motion.step.y
+      this.#scheduleRender()
+      if (this.#wheelPending.x || this.#wheelPending.y) {
+        this.#wheelFrame = requestAnimationFrame(tick)
+      } else this.#wheelTime = 0
+    }
+    this.#wheelFrame = requestAnimationFrame(tick)
+  }
+
   /**
    * Short interruptible UI-camera motion. Real pointer movements cancel it.
    * @param {{x:number,y:number,scale:number}} target
    * @param {number} duration
    */
   #animateCamera(target, duration) {
+    this.#cancelWheelMotion()
     this.#cancelCameraMotion()
     if (this.#reducedMotion) {
       this.#camera = target
@@ -551,6 +593,7 @@ class PosterWall {
   #toggle(key) {
     if (!this.isOpen) return
     this.#cancelCameraMotion()
+    this.#cancelWheelMotion()
     const oldBlock = this.#activeKey ? this.#tileByKey.get(this.#activeKey)?.blockIndex : null
     const newBlock = this.#tileByKey.get(key)?.blockIndex
     const blocks = new Set([oldBlock,newBlock].filter((value) => value !== null && value !== undefined))
@@ -579,12 +622,10 @@ class PosterWall {
     if (this.#activeKey) {
       const rect = this.#positions.get(this.#activeKey)
       if (rect) {
-        const { scale } = this.#camera
-        this.#animateCamera({
-          x: this.#viewport.clientWidth / 2 - (rect.x + rect.w / 2) * scale,
-          y: this.#viewport.clientHeight / 2 - (rect.y + rect.h / 2) * scale,
-          scale,
-        }, 420)
+        this.#animateCamera(
+          focusedWallCamera(this.#camera,rect,
+            this.#viewport.clientWidth,this.#viewport.clientHeight),
+          420)
       }
     }
   }
@@ -803,8 +844,8 @@ class PosterWall {
       const rect = this.#viewport.getBoundingClientRect()
       const x = event.clientX - rect.left
       const y = event.clientY - rect.top
-      // Folia's wall treats ordinary wheel movement as navigation;
-      // Ctrl/trackpad pinch or Alt + wheel zooms around the pointer.
+      // Wheel notches accumulate into one damping tail. Precise trackpads
+      // go straight to the camera because the OS already supplies inertia.
       if (event.ctrlKey || event.altKey) {
         this.zoom(Math.exp(-event.deltaY * 0.0022), x, y)
         return
@@ -813,13 +854,20 @@ class PosterWall {
         : event.deltaMode === 2 ? this.#viewport.clientHeight : 1
       const dx = (event.shiftKey ? event.deltaY : event.deltaX) * step
       const dy = (event.shiftKey ? 0 : event.deltaY) * step
-      const target = { ...this.#camera, x:this.#camera.x-dx, y:this.#camera.y-dy }
-      if (event.deltaMode === 0 && Math.abs(dx)+Math.abs(dy)<80) {
-        // Trackpads already emit smooth, high-rate deltas.
+      const classification = classifyWallWheel(
+        this.#wheelLastEvent,this.#wheelPrecise,event)
+      this.#wheelLastEvent = classification.lastTimestamp
+      this.#wheelPrecise = classification.preciseGesture
+      if (classification.kind === 'precise' || this.#reducedMotion) {
+        const carry = this.#wheelPending
+        this.#cancelWheelMotion()
         this.#cancelCameraMotion()
-        this.#camera = target
+        this.#camera.x += carry.x - dx
+        this.#camera.y += carry.y - dy
         this.#scheduleRender()
-      } else this.#animateCamera(target, 210)
+      } else {
+        this.#moveWheel(dx,dy)
+      }
     }, { passive: false })
     // Controls live outside the viewport, so keyboard shortcuts must be scoped
     // to the entire presentation (including focused action buttons).
@@ -853,6 +901,7 @@ class PosterWall {
   #pointerDown(event) {
     if (event.pointerType === 'mouse' && event.button !== 0) return
     this.#cancelCameraMotion()
+    this.#cancelWheelMotion()
     this.#viewport.setPointerCapture(event.pointerId)
     this.#pointers.set(event.pointerId, {
       x: event.clientX, y: event.clientY,
@@ -957,6 +1006,10 @@ class PosterWall {
   /** @param {KeyboardEvent} event */
   #keyDown(event) {
     if (event.altKey || event.ctrlKey || event.metaKey) return
+    if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Escape','+','=','-','0','Home'].includes(event.key)) {
+      this.#cancelCameraMotion()
+      this.#cancelWheelMotion()
+    }
     const step = event.shiftKey ? 170 : 86
     let used = true
     if (event.key === 'Escape') {
