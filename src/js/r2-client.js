@@ -82,7 +82,12 @@ class R2Client {
     }))
 
     /** @type {FileItem[]} */
-    const files = [...doc.querySelectorAll('Contents')]
+    const contents = [...doc.querySelectorAll('Contents')]
+    // A CommonPrefix is virtual. Only a matching Contents/Key represents
+    // an actual folder-marker object, which can safely be copied/deleted.
+    const hasFolderMarker = Boolean(prefix) && contents.some((el) =>
+      el.querySelector('Key')?.textContent === prefix)
+    const files = contents
       .map((el) => ({
         key: el.querySelector('Key')?.textContent ?? '',
         size: parseInt(el.querySelector('Size')?.textContent ?? '0', 10),
@@ -94,7 +99,7 @@ class R2Client {
     const isTruncated = doc.querySelector('IsTruncated')?.textContent === 'true'
     const nextToken = doc.querySelector('NextContinuationToken')?.textContent || ''
 
-    return { folders, files, isTruncated, nextToken }
+    return { folders, files, isTruncated, nextToken, hasFolderMarker }
   }
 
   /**
@@ -213,6 +218,14 @@ class R2Client {
       },
     })
     this.#assertOk(res)
+    // S3 CopyObject can return HTTP 200 with an embedded XML Error.
+    // Never report success and delete a source after an incomplete copy.
+    const body = await res.text()
+    if (body.trim()) {
+      const document = new DOMParser().parseFromString(body, 'application/xml')
+      const code = document.querySelector('Error > Code')?.textContent
+      if (code) throw new Error('R2_COPY_' + code)
+    }
     this.#presignedGetCache.delete(url)
   }
 
