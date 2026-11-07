@@ -3,6 +3,11 @@ import { LANG_KEY } from './constants.js'
 const I18N = {
   zh: {
     appTitle: 'R2 Web',
+    filterPlaceholder: '筛选当前目录...',
+    filterClear: '清除筛选',
+    filterNoResults: '没有找到匹配的文件',
+    filterTryAgain: '试试其他关键词，或者清除筛选。',
+    itemsFiltered: '显示 {count} / {total} 项',
     connectTitle: '连接到 R2',
     connectDesc: '填写你的 R2 凭据即可开始，放心，数据只留在你的浏览器里。',
     accountId: '账户 ID（Account ID）',
@@ -255,6 +260,11 @@ const I18N = {
   },
   zh_TW: {
     appTitle: 'R2 Web',
+    filterPlaceholder: '篩選目前目錄...',
+    filterClear: '清除篩選',
+    filterNoResults: '找不到符合的檔案',
+    filterTryAgain: '請試試其他關鍵字，或清除篩選。',
+    itemsFiltered: '顯示 {count} / {total} 項',
     connectTitle: '連接到 R2',
     connectDesc: '填寫你的 R2 權杖即可開始，放心，資料只留在你的瀏覽器裡。',
     accountId: '帳戶 ID（Account ID）',
@@ -507,6 +517,11 @@ const I18N = {
   },
   en: {
     appTitle: 'R2 Web',
+    filterPlaceholder: 'Filter this folder...',
+    filterClear: 'Clear filter',
+    filterNoResults: 'No matching files',
+    filterTryAgain: 'Try another keyword or clear the filter.',
+    itemsFiltered: 'Showing {count} of {total}',
     connectTitle: 'Connect to R2',
     connectDesc: 'Enter your R2 credentials to get started. Everything stays safely in your browser.',
     accountId: 'Account ID',
@@ -763,6 +778,11 @@ const I18N = {
   },
   ja: {
     appTitle: 'R2 Web',
+    filterPlaceholder: 'このフォルダーを検索...',
+    filterClear: 'フィルターを解除',
+    filterNoResults: '一致するファイルがありません',
+    filterTryAgain: '別のキーワードを試すか、フィルターを解除してください。',
+    itemsFiltered: '{total} 件中 {count} 件を表示',
     connectTitle: 'R2 に接続',
     connectDesc: 'R2 の認証情報を入力して始めましょう。データはブラウザにのみ保存されます。',
     accountId: 'アカウント ID（Account ID）',
