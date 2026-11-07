@@ -46,3 +46,18 @@ test('local filter has a dedicated empty state and does not change R2 client log
   assert.match(i18n, /filterNoResults:/)
   assert.match(i18n, /itemsFiltered:/)
 })
+
+test('settings tabs expose accessible relationships and keyboard navigation', () => {
+  const app = readFileSync(new URL('../src/js/app.js', import.meta.url), 'utf8')
+  for (const tab of ['preferences', 'r2', 'upload', 'compression', 'about']) {
+    assert.ok(html.includes('id="config-tab-' + tab + '"'))
+    assert.ok(html.includes('aria-controls="config-panel-' + tab + '"'))
+    assert.ok(html.includes('id="config-panel-' + tab + '"'))
+    assert.ok(html.includes('aria-labelledby="config-tab-' + tab + '"'))
+  }
+  assert.match(app, /btn\.tabIndex = isActive \? 0 : -1/)
+  assert.match(app, /btn\.onkeydown = \(event\) =>/)
+  assert.match(app, /event\.key === 'Home'/)
+  assert.match(app, /event\.key === 'End'/)
+  assert.match(app, /button\.setAttribute\('aria-label', label\)/)
+})
