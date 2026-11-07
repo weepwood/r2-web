@@ -1,4 +1,5 @@
 import { STORAGE_KEY, THEME_KEY, LANG_KEY, VIEW_KEY, DENSITY_KEY, SORT_BY_KEY, SORT_ORDER_KEY } from './constants.js'
+import { sanitizeSharedConfig, sanitizeSharedPreferences } from './shared-config.js'
 
 /** @typedef {'public'|'private'} BucketAccess */
 /** @typedef {{ id: string; name: string; alias?: string; customDomain?: string; bucketAccess?: BucketAccess }} BucketConfig */
@@ -211,18 +212,18 @@ class ConfigManager {
   }
 
   toBase64() {
-    const state = this.loadState()
-    const safeState = {
-      ...state,
-      profiles: state.profiles.map(({ secretAccessKey: _secret, accessKeyId: _access, accountId: _account, ...profile }) => profile),
-      theme: localStorage.getItem(THEME_KEY) || undefined,
-      lang: localStorage.getItem(LANG_KEY) || undefined,
-      view: localStorage.getItem(VIEW_KEY) || undefined,
-      density: localStorage.getItem(DENSITY_KEY) || undefined,
-      sortBy: localStorage.getItem(SORT_BY_KEY) || undefined,
-      sortOrder: localStorage.getItem(SORT_ORDER_KEY) || undefined,
-      shareType: 'safe',
-    }
+    const sharedConfig = sanitizeSharedConfig(this.loadState())
+    // Build the entire URL payload from explicit allowlists. Do not spread
+    // StoredConfig or ProfileConfig: they may gain new secret fields later.
+    const safePreferences = sanitizeSharedPreferences({
+      theme: localStorage.getItem(THEME_KEY),
+      lang: localStorage.getItem(LANG_KEY),
+      view: localStorage.getItem(VIEW_KEY),
+      density: localStorage.getItem(DENSITY_KEY),
+      sortBy: localStorage.getItem(SORT_BY_KEY),
+      sortOrder: localStorage.getItem(SORT_ORDER_KEY),
+    })
+    const safeState = { ...sharedConfig, ...safePreferences, shareType: 'safe' }
     return btoa(unescape(encodeURIComponent(JSON.stringify(safeState))))
   }
 
@@ -230,16 +231,24 @@ class ConfigManager {
   loadFromBase64(b64) {
     try {
       const json = decodeURIComponent(escape(atob(b64)))
+      // Prevent unusually large or malicious links from exhausting memory.
+      if (json.length > 100_000) return false
       const payload = JSON.parse(json)
-      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false
+      const config = sanitizeSharedConfig(payload)
+      if (!config) return false
 
-      const { theme, lang, view, density, sortBy, sortOrder, shareType: _shareType, ...config } = payload
-      if (theme) localStorage.setItem(THEME_KEY, theme)
-      if (lang) localStorage.setItem(LANG_KEY, lang)
-      if (view) localStorage.setItem(VIEW_KEY, view)
-      if (density) localStorage.setItem(DENSITY_KEY, density)
-      if (sortBy) localStorage.setItem(SORT_BY_KEY, sortBy)
-      if (sortOrder) localStorage.setItem(SORT_ORDER_KEY, sortOrder)
+      const prefs = sanitizeSharedPreferences(payload)
+      const storageKeys = {
+        theme: THEME_KEY,
+        lang: LANG_KEY,
+        view: VIEW_KEY,
+        density: DENSITY_KEY,
+        sortBy: SORT_BY_KEY,
+        sortOrder: SORT_ORDER_KEY,
+      }
+      for (const [name, storageKey] of Object.entries(storageKeys)) {
+        if (prefs[name]) localStorage.setItem(storageKey, prefs[name])
+      }
 
       if (config.schemaVersion === SCHEMA_VERSION && Array.isArray(config.profiles)) {
         const current = this.loadState()
@@ -252,11 +261,12 @@ class ConfigManager {
           }
           this.#saveState(current)
         } else {
+          // Imported links contain only public metadata. Every destination
+          // device must supply its own R2 access credentials.
           this.#saveState(incoming)
         }
-      } else if (Object.values(config).some(Boolean)) {
-        const migrated = this.#migrateLegacy(config)
-        this.#saveState(migrated)
+      } else {
+        this.#saveState(this.#migrateLegacy(config))
       }
       return true
     } catch {
