@@ -344,7 +344,20 @@ class UploadManager {
 
     body.innerHTML = ''
     panel.hidden = false
+    panel.classList.remove('is-collapsed')
+    panel.dataset.state = 'preparing'
+    $('#upload-panel-toggle').setAttribute('aria-expanded', 'true')
+    $('#upload-panel-toggle').setAttribute('aria-label', t('uploadCollapse'))
     title.textContent = t('uploadPreparing')
+
+    const updateOverallProgress = (completed, total) => {
+      const percent = total > 0 ? Math.round((completed / total) * 100) : 0
+      $('#upload-panel-summary').textContent = `${completed} / ${total}`
+      $('#upload-panel-percent').textContent = `${percent}%`
+      $('#upload-panel-progress-fill').style.width = `${percent}%`
+      $('#upload-panel-progress').setAttribute('aria-valuenow', String(percent))
+    }
+    updateOverallProgress(0, 0)
 
     const cfg = this.#config.get()
     const filenameTpl = cfg.filenameTpl || ''
@@ -461,7 +474,9 @@ class UploadManager {
     }
 
     panel.hidden = false
+    panel.dataset.state = 'uploading'
     title.textContent = `${t('uploadProgress')} 0/${uploads.length}`
+    updateOverallProgress(0, uploads.length)
 
     let completed = 0
     const results = await runWithConcurrency(
@@ -482,6 +497,7 @@ class UploadManager {
         } finally {
           completed++
           title.textContent = `${t('uploadProgress')} ${completed}/${uploads.length}`
+          updateOverallProgress(completed, uploads.length)
         }
       }),
       cfg.uploadConcurrency ?? 3,
@@ -489,6 +505,10 @@ class UploadManager {
 
     const success = results.filter((r) => r.status === 'fulfilled').length
     const fail = results.filter((r) => r.status === 'rejected').length
+    panel.dataset.state = fail === 0 ? 'done' : 'error'
+    $('#upload-panel-summary').textContent = fail === 0
+      ? t('uploadSuccess', { count: success })
+      : t('uploadPartialFail', { success, fail })
 
     if (fail === 0) {
       this.#ui.toast(t('uploadSuccess', { count: success }), 'success')
@@ -514,17 +534,18 @@ class UploadManager {
       if (k.toLowerCase() !== 'host') headers.set(k, v)
     }
 
-    const res = await fetch(signed.url, {
-      method: 'PUT',
-      headers,
-      body: file,
-    })
-
-    if (bar) bar.classList.remove('indeterminate')
-
-    if (!res.ok) {
+    try {
+      const res = await fetch(signed.url, {
+        method: 'PUT',
+        headers,
+        body: file,
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch (error) {
       if (bar) bar.classList.add('error')
-      throw new Error(`HTTP ${res.status}`)
+      throw error
+    } finally {
+      if (bar) bar.classList.remove('indeterminate')
     }
 
     if (bar) {
