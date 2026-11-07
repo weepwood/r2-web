@@ -7,6 +7,10 @@ import {
   DENSITY_KEY,
   SORT_BY_KEY,
   SORT_ORDER_KEY,
+  IMAGE_RE,
+  VIDEO_RE,
+  AUDIO_RE,
+  TEXT_RE,
 } from './constants.js'
 import { ConfigManager } from './config-manager.js'
 import { FileExplorer } from './file-explorer.js'
@@ -222,7 +226,22 @@ class App {
     $('#empty-upload-hint').textContent = t('uploadHint')
     $('#paste-hint-text').textContent = t('pasteHint')
 
+    $('#preview-prev').setAttribute('aria-label', t('previewPrevious'))
+    $('#preview-next').setAttribute('aria-label', t('previewNext'))
+    const toggle = $('#upload-panel-toggle')
+    toggle.setAttribute(
+      'aria-label',
+      t($('#upload-panel').classList.contains('is-collapsed') ? 'uploadExpand' : 'uploadCollapse'),
+    )
+    $('#upload-panel-progress').setAttribute('aria-label', t('uploadOverallProgress'))
     $('#load-more-btn').textContent = t('loadMore')
+    const filterInput = /** @type {HTMLInputElement} */ ($('#file-filter-input'))
+    filterInput.placeholder = t('filterPlaceholder')
+    filterInput.setAttribute('aria-label', t('filterPlaceholder'))
+    $('#file-filter-clear').setAttribute('aria-label', t('filterClear'))
+    $('#filter-empty-title').textContent = t('filterNoResults')
+    $('#filter-empty-hint').textContent = t('filterTryAgain')
+    $('#filter-empty-clear-btn').textContent = t('filterClear')
     this.#explorer?.updateCountDisplay()
 
     $('[data-action="preview"] span').textContent = t('preview')
@@ -287,6 +306,12 @@ class App {
     $('#batch-copy-text').textContent = t('copy')
     $('#batch-delete-text').textContent = t('delete')
     $('#batch-toggle-text').textContent = t(this.#batchMode ? 'exitBatchMode' : 'batchMode')
+
+    $('#batch-cancel-btn').setAttribute('aria-label', t('cancel'))
+    document.querySelectorAll('button.icon-btn[data-tooltip]').forEach((button) => {
+      const label = /** @type {HTMLElement} */ (button).dataset.tooltip
+      if (label) button.setAttribute('aria-label', label)
+    })
 
     this.#ui.initTooltip()
   }
@@ -378,9 +403,8 @@ class App {
       $('#batch-select-all-text').textContent = t('batchSelectAll')
       return
     }
-    const total = document.querySelectorAll('#file-grid .file-card').length
-    const selected = this.#explorer.selectionCount
-    const allSelected = total > 0 && selected === total
+    const visibleCards = [...document.querySelectorAll('#file-grid .file-card:not([hidden])')]
+    const allSelected = visibleCards.length > 0 && visibleCards.every((card) => card.classList.contains('selected'))
     $('#batch-select-all-text').textContent = allSelected ? t('batchDeselectAll') : t('batchSelectAll')
   }
 
@@ -445,17 +469,37 @@ class App {
       tabButtons.forEach((btn) => {
         const isActive = btn.dataset.tab === tabId
         btn.setAttribute('aria-selected', String(isActive))
+        btn.tabIndex = isActive ? 0 : -1
       })
       tabPanels.forEach((panel) => {
         panel.hidden = panel.dataset.panel !== tabId
       })
     }
 
-    tabButtons.forEach((btn) => {
-      btn.addEventListener('click', () => {
+    tabButtons.forEach((btn, index) => {
+      // Reassign handlers each open so reopening Settings never duplicates listeners.
+      btn.onclick = () => {
         const tabId = btn.dataset.tab
         if (tabId) switchTab(tabId)
-      })
+      }
+      btn.onkeydown = (event) => {
+        const next = {
+          ArrowRight: 1,
+          ArrowDown: 1,
+          ArrowLeft: -1,
+          ArrowUp: -1,
+        }[/** @type {'ArrowRight'|'ArrowDown'|'ArrowLeft'|'ArrowUp'} */ (event.key)]
+        let targetIndex
+        if (event.key === 'Home') targetIndex = 0
+        else if (event.key === 'End') targetIndex = tabButtons.length - 1
+        else if (next) targetIndex = (index + next + tabButtons.length) % tabButtons.length
+        else return
+        event.preventDefault()
+        const target = tabButtons[targetIndex]
+        const tabId = target.dataset.tab
+        if (tabId) switchTab(tabId)
+        target.focus()
+      }
     })
 
     switchTab(defaultTab)
@@ -611,7 +655,58 @@ class App {
     })
   }
 
+  /**
+   * Build preview navigation from currently displayed, supported files.
+   * Hidden (locally filtered) rows and folders are excluded.
+   * @param {{key: string, size?: number, lastModified?: number}} item
+   */
+  #openPreview(item) {
+    const files = /** @type {NodeListOf<HTMLElement>} */ (
+      document.querySelectorAll('#file-grid .file-card:not([hidden])[data-is-folder="false"]')
+    )
+    const supported = [IMAGE_RE, VIDEO_RE, AUDIO_RE, TEXT_RE]
+    const items = [...files]
+      .filter((card) => supported.some((re) => re.test(card.dataset.key ?? '')))
+      .map((card) => ({
+        key: card.dataset.key ?? '',
+        size: Number(card.dataset.size ?? 0),
+        lastModified: Number(card.dataset.mod ?? 0),
+      }))
+    this.#preview?.setNavigationItems(items)
+    void this.#preview?.preview(item)
+  }
+
   #bindAppEvents() {
+    const filterInput = /** @type {HTMLInputElement} */ ($('#file-filter-input'))
+    const clearFilter = () => {
+      filterInput.value = ''
+      $('#file-filter-clear').hidden = true
+      this.#explorer?.setFilterQuery('')
+      this.#updateSelectAllBtn()
+      filterInput.focus()
+    }
+
+    filterInput.addEventListener('input', () => {
+      $('#file-filter-clear').hidden = filterInput.value.length === 0
+      this.#explorer?.setFilterQuery(filterInput.value)
+      this.#updateSelectAllBtn()
+    })
+    $('#file-filter-clear').addEventListener('click', clearFilter)
+    $('#filter-empty-clear-btn').addEventListener('click', clearFilter)
+    filterInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && filterInput.value) {
+        e.preventDefault()
+        clearFilter()
+      }
+    })
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || !this.#config.isValid()) return
+      if (document.querySelector('dialog[open]')) return
+      if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable="true"]')) return
+      e.preventDefault()
+      filterInput.focus()
+    })
+
     $('#refresh-btn').addEventListener('click', async () => {
       const btn = /** @type {HTMLElement} */ ($('#refresh-btn'))
       btn.classList.add('refreshing')
@@ -662,7 +757,7 @@ class App {
         if (card.dataset.isFolder === 'true') {
           /** @type {FileExplorer} */ this.#explorer.navigate(card.dataset.key ?? '')
         } else {
-          /** @type {FilePreview} */ this.#preview.preview({
+          this.#openPreview({
             key: card.dataset.key ?? '',
             size: Number(card.dataset.size ?? 0),
             lastModified: Number(card.dataset.mod ?? 0),
@@ -699,7 +794,7 @@ class App {
 
       switch (action) {
         case 'preview':
-          /** @type {FilePreview} */ this.#preview.preview({
+          this.#openPreview({
             key,
             size: Number(menu.dataset.size ?? 0),
             lastModified: Number(menu.dataset.mod ?? 0),
@@ -779,6 +874,16 @@ class App {
     $('#load-more-btn').addEventListener('click', () => /** @type {FileExplorer} */ (this.#explorer).loadMore())
 
     const previewDialog = /** @type {HTMLDialogElement} */ ($('#preview-dialog'))
+    $('#preview-prev').addEventListener('click', () => this.#preview?.navigate(-1))
+    $('#preview-next').addEventListener('click', () => this.#preview?.navigate(1))
+    previewDialog.addEventListener('keydown', (e) => {
+      if (e.altKey || e.ctrlKey || e.metaKey || !['ArrowLeft', 'ArrowRight'].includes(e.key)) return
+      // Preserve native seek/volume controls in audio and video previews.
+      if ($('#preview-body').querySelector('video, audio')) return
+      if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]')) return
+      e.preventDefault()
+      this.#preview?.navigate(e.key === 'ArrowRight' ? 1 : -1)
+    })
     $('#preview-close').addEventListener('click', () => previewDialog.close())
     previewDialog.addEventListener('click', (e) => {
       if (e.target === previewDialog) previewDialog.close()
@@ -794,6 +899,12 @@ class App {
 
     $('#upload-panel-close').addEventListener('click', () => {
       $('#upload-panel').hidden = true
+    })
+    $('#upload-panel-toggle').addEventListener('click', () => {
+      const panel = $('#upload-panel')
+      const collapsed = panel.classList.toggle('is-collapsed')
+      $('#upload-panel-toggle').setAttribute('aria-expanded', String(!collapsed))
+      $('#upload-panel-toggle').setAttribute('aria-label', t(collapsed ? 'uploadExpand' : 'uploadCollapse'))
     })
 
     $('#sort-name-btn').addEventListener('click', () => this.#setSortBy('name'))
@@ -832,9 +943,9 @@ class App {
     })
 
     $('#batch-select-all-btn').addEventListener('click', () => {
-      const total = document.querySelectorAll('#file-grid .file-card').length
-      const selected = /** @type {FileExplorer} */ (this.#explorer).selectionCount
-      if (total > 0 && selected === total) {
+      const visibleCards = [...document.querySelectorAll('#file-grid .file-card:not([hidden])')]
+      const allSelected = visibleCards.length > 0 && visibleCards.every((card) => card.classList.contains('selected'))
+      if (allSelected) {
         /** @type {FileExplorer} */ (this.#explorer).clearSelection()
       } else {
         /** @type {FileExplorer} */ (this.#explorer).selectAll()

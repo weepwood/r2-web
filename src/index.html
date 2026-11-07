@@ -77,19 +77,19 @@
         <div class="dialog-body">
           <!-- Tab Navigation -->
           <div class="config-tabs" role="tablist">
-            <button type="button" class="config-tab-btn" role="tab" aria-selected="true" data-tab="preferences">
+            <button type="button" class="config-tab-btn" role="tab" id="config-tab-preferences" aria-controls="config-panel-preferences" aria-selected="true" data-tab="preferences">
               <span id="tab-preferences">偏好设置</span>
             </button>
-            <button type="button" class="config-tab-btn" role="tab" data-tab="r2">
+            <button type="button" class="config-tab-btn" role="tab" id="config-tab-r2" aria-controls="config-panel-r2" aria-selected="false" data-tab="r2">
               <span id="tab-r2">R2 设置</span>
             </button>
-            <button type="button" class="config-tab-btn" role="tab" data-tab="upload">
+            <button type="button" class="config-tab-btn" role="tab" id="config-tab-upload" aria-controls="config-panel-upload" aria-selected="false" data-tab="upload">
               <span id="tab-upload">上传设置</span>
             </button>
-            <button type="button" class="config-tab-btn" role="tab" data-tab="compression">
+            <button type="button" class="config-tab-btn" role="tab" id="config-tab-compression" aria-controls="config-panel-compression" aria-selected="false" data-tab="compression">
               <span id="tab-compression">压缩设置</span>
             </button>
-            <button type="button" class="config-tab-btn" role="tab" data-tab="about">
+            <button type="button" class="config-tab-btn" role="tab" id="config-tab-about" aria-controls="config-panel-about" aria-selected="false" data-tab="about">
               <span id="tab-about">关于</span>
             </button>
           </div>
@@ -97,7 +97,7 @@
           <!-- Tab Panels Container -->
           <div class="config-tab-panels">
             <!-- Tab 1: Preferences -->
-            <form class="config-tab-panel" role="tabpanel" data-panel="preferences">
+            <form class="config-tab-panel" role="tabpanel" id="config-panel-preferences" aria-labelledby="config-tab-preferences" data-panel="preferences">
               <div class="config-section">
                 <div class="field">
                   <div class="field-label">
@@ -143,7 +143,7 @@
             </form>
 
             <!-- Tab 2: R2 Config -->
-            <form class="config-tab-panel" role="tabpanel" data-panel="r2" hidden>
+            <form class="config-tab-panel" role="tabpanel" id="config-panel-r2" aria-labelledby="config-tab-r2" data-panel="r2" hidden>
               <div class="config-section">
                 <div class="field">
                   <div class="field-label">
@@ -200,7 +200,7 @@
             </form>
 
             <!-- Tab 3: Upload -->
-            <form class="config-tab-panel" role="tabpanel" data-panel="upload" hidden>
+            <form class="config-tab-panel" role="tabpanel" id="config-panel-upload" aria-labelledby="config-tab-upload" data-panel="upload" hidden>
               <div class="config-section">
                 <div class="field">
                   <div class="field-label">
@@ -259,7 +259,7 @@
             </form>
 
             <!-- Tab 4: Compression -->
-            <form class="config-tab-panel" role="tabpanel" data-panel="compression" hidden>
+            <form class="config-tab-panel" role="tabpanel" id="config-panel-compression" aria-labelledby="config-tab-compression" data-panel="compression" hidden>
               <div class="config-section">
                 <div class="field">
                   <div class="field-label">
@@ -316,7 +316,7 @@
             </form>
 
             <!-- Tab 5: About -->
-            <div class="config-tab-panel" role="tabpanel" data-panel="about" hidden>
+            <div class="config-tab-panel" role="tabpanel" id="config-panel-about" aria-labelledby="config-tab-about" data-panel="about" hidden>
               <div class="about-section">
                 <div class="about-header">
                   <img src="favicon.ico" alt="R2 Web" class="about-icon" />
@@ -565,11 +565,16 @@
     <div id="app" hidden>
       <!-- Topbar -->
       <header class="topbar">
-        <div class="flex items-center" style="gap: 8px">
-          <img src="favicon.ico" alt="" class="topbar-logo" />
-          <h1 class="topbar-title">R2 Web</h1>
+        <div class="flex items-center topbar-brand" style="gap: 8px">
+          <span class="topbar-logo-wrap" aria-hidden="true">
+            <img src="favicon.ico" alt="" class="topbar-logo" />
+          </span>
+          <div class="topbar-brand-copy">
+            <h1 class="topbar-title">R2 Web</h1>
+            <span class="topbar-subtitle">Cloudflare R2</span>
+          </div>
         </div>
-        <div class="flex items-center" style="gap: 4px">
+        <div class="flex items-center topbar-actions" style="gap: 4px">
           <button type="button" class="icon-btn" id="share-btn" data-tooltip="分享配置">
             <svg
               class="icon"
@@ -623,7 +628,7 @@
 
       <!-- Toolbar -->
       <div class="toolbar">
-        <div class="flex items-center" style="gap: 4px">
+        <div class="flex items-center toolbar-location" style="gap: 4px">
           <nav aria-label="Breadcrumb">
             <ol class="breadcrumb" id="breadcrumb">
               <li><button type="button" class="breadcrumb-btn" data-prefix="">根目录</button></li>
@@ -645,7 +650,21 @@
           </button>
           <small class="text-secondary" id="item-count" hidden></small>
         </div>
-        <div class="flex items-center" style="gap: 8px">
+        <div class="toolbar-search" role="search">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <circle cx="10.5" cy="10.5" r="6.5" />
+            <path d="m16 16 4.5 4.5" />
+          </svg>
+          <input id="file-filter-input" type="search" autocomplete="off" spellcheck="false"
+            placeholder="筛选当前目录..." aria-label="筛选当前目录" aria-controls="file-grid" aria-keyshortcuts="/" />
+          <button type="button" id="file-filter-clear" class="filter-clear" aria-label="清除筛选" hidden>
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+          <kbd class="filter-shortcut" aria-hidden="true">/</kbd>
+        </div>
+        <div class="flex items-center toolbar-controls" style="gap: 8px">
           <!-- Batch Action Bar -->
           <div class="batch-action-bar" id="batch-action-bar" hidden>
             <span class="batch-count" id="batch-count"></span>
@@ -928,9 +947,20 @@
       </div>
 
       <!-- Upload Panel -->
-      <div class="upload-panel" id="upload-panel" hidden>
+      <div class="upload-panel" id="upload-panel" role="region" aria-labelledby="upload-panel-title" hidden>
         <div class="upload-panel-header">
-          <span id="upload-panel-title">准备中...</span>
+          <div class="upload-panel-heading">
+            <strong id="upload-panel-title">准备中...</strong>
+            <small id="upload-panel-caption">Cloudflare R2</small>
+          </div>
+          <div class="upload-panel-actions">
+            <button type="button" class="icon-btn sm" id="upload-panel-toggle"
+              aria-expanded="true" aria-controls="upload-panel-body" aria-label="收起上传列表">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="m6 15 6-6 6 6" />
+              </svg>
+            </button>
           <button type="button" class="icon-btn sm" id="upload-panel-close" data-tooltip="关闭">
             <svg
               class="icon"
@@ -945,6 +975,17 @@
               <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
           </button>
+          </div>
+        </div>
+        <div class="upload-panel-overall" id="upload-panel-overall">
+          <div class="upload-overall-info">
+            <span id="upload-panel-summary" role="status" aria-live="polite">准备中...</span>
+            <span id="upload-panel-percent">0%</span>
+          </div>
+          <div class="upload-overall-track" id="upload-panel-progress" role="progressbar"
+            aria-label="总体上传进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <span class="upload-overall-fill" id="upload-panel-progress-fill"></span>
+          </div>
         </div>
         <div class="upload-panel-body" id="upload-panel-body"></div>
       </div>
@@ -985,6 +1026,15 @@
           </button>
           <small class="text-secondary" id="empty-upload-hint">拖放、粘贴或点击上传</small>
         </div>
+        <div class="filter-empty-state" id="filter-empty-state" hidden>
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <circle cx="10.5" cy="10.5" r="6.5" />
+            <path d="m16 16 4.5 4.5" />
+          </svg>
+          <p id="filter-empty-title">没有找到匹配的文件</p>
+          <span id="filter-empty-hint">试试其他关键词，或者清除筛选。</span>
+          <button type="button" class="btn secondary sm" id="filter-empty-clear-btn">清除筛选</button>
+        </div>
         <div class="file-grid" id="file-grid"></div>
 
         <div class="load-more" id="load-more" hidden>
@@ -1003,7 +1053,10 @@
     <dialog id="preview-dialog">
       <div class="dialog-panel" tabindex="-1" autofocus>
         <div class="dialog-header">
-          <span class="truncate" id="preview-filename"></span>
+          <div class="preview-heading">
+            <span class="truncate" id="preview-filename"></span>
+            <span class="preview-position" id="preview-position" hidden></span>
+          </div>
           <div class="dialog-header-actions">
             <button type="button" class="icon-btn sm" id="preview-copy-text" data-tooltip="复制文本" hidden>
               <svg
@@ -1082,7 +1135,23 @@
             </button>
           </div>
         </div>
-        <div class="dialog-body" id="preview-body"></div>
+        <div class="preview-stage">
+          <button type="button" class="preview-nav preview-prev" id="preview-prev"
+            aria-label="上一个文件" aria-controls="preview-body" hidden>
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+          </button>
+          <div class="dialog-body" id="preview-body" aria-live="off"></div>
+          <button type="button" class="preview-nav preview-next" id="preview-next"
+            aria-label="下一个文件" aria-controls="preview-body" hidden>
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+          </button>
+        </div>
         <div class="dialog-footer" id="preview-footer"></div>
       </div>
     </dialog>

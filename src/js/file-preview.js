@@ -5,6 +5,8 @@ import { R2Client } from './r2-client.js'
 import { UIManager } from './ui-manager.js'
 import { $, formatDate, getErrorMessage, extractFileName, getMimeType } from './utils.js'
 
+/** @typedef {{key: string, size?: number, lastModified?: number}} PreviewItem */
+
 class FilePreview {
   /** @type {R2Client} */
   #r2
@@ -13,6 +15,9 @@ class FilePreview {
   #currentKey = ''
   #currentText = ''
   #currentUrl = ''
+  /** @type {PreviewItem[]} */
+  #navigationItems = []
+  #loadGeneration = 0
 
   /** @param {R2Client} r2 @param {UIManager} ui */
   constructor(r2, ui) {
@@ -20,6 +25,13 @@ class FilePreview {
     this.#ui = ui
     const dialog = /** @type {HTMLDialogElement} */ ($('#preview-dialog'))
     dialog.addEventListener('close', () => {
+      // The close event can run after a rapid reopen; never invalidate the new preview.
+      if (dialog.open) return
+      // Ignore any pending HEAD, signed URL or text fetch response after closing.
+      this.#loadGeneration++
+      this.#currentKey = ''
+      this.#currentText = ''
+      this.#currentUrl = ''
       dialog.querySelectorAll('video, audio').forEach((el) => /** @type {HTMLMediaElement} */ (el).pause())
     })
   }
@@ -28,104 +40,153 @@ class FilePreview {
     return this.#currentKey
   }
 
-  /** @param {{key: string, size?: number, lastModified?: number}} item */
+  /**
+   * Populate navigation from the currently displayed, previewable files.
+   * Never reaches into R2 or an unloaded directory.
+   * @param {PreviewItem[]} items
+   */
+  setNavigationItems(items) {
+    this.#navigationItems = items.map((item) => ({ ...item }))
+    this.#updateNavigation()
+  }
+
+  /** @param {-1 | 1} direction */
+  navigate(direction) {
+    const dialog = /** @type {HTMLDialogElement} */ ($('#preview-dialog'))
+    if (!dialog.open) return
+    const index = this.#navigationItems.findIndex((item) => item.key === this.#currentKey)
+    const next = this.#navigationItems[index + direction]
+    if (!next || index < 0) return
+    void this.preview(next)
+  }
+
+  #updateNavigation() {
+    const previous = /** @type {HTMLButtonElement} */ ($('#preview-prev'))
+    const next = /** @type {HTMLButtonElement} */ ($('#preview-next'))
+    const position = $('#preview-position')
+    const index = this.#navigationItems.findIndex((item) => item.key === this.#currentKey)
+    const hasList = this.#navigationItems.length > 1 && index >= 0
+
+    previous.hidden = !hasList
+    next.hidden = !hasList
+    position.hidden = !hasList
+    previous.disabled = !hasList || index === 0
+    next.disabled = !hasList || index === this.#navigationItems.length - 1
+    if (hasList) position.textContent = `${index + 1} / ${this.#navigationItems.length}`
+  }
+
+  /** @param {string} message @param {'loading'|'error'|'empty'} kind */
+  #showMessage(message, kind) {
+    const p = document.createElement('p')
+    p.className = `preview-message preview-message-${kind}`
+    if (kind === 'loading') p.setAttribute('role', 'status')
+    if (kind === 'error') p.setAttribute('role', 'alert')
+    p.textContent = message
+    $('#preview-body').replaceChildren(p)
+  }
+
+  /** @param {{contentLength: number, contentType: string, lastModified?: Date}} meta */
+  #renderMetadata(meta) {
+    const footer = $('#preview-footer')
+    const fields = [
+      `${t('size')}: ${filesize(meta.contentLength)}`,
+      `${t('contentType')}: ${meta.contentType || 'unknown'}`,
+    ]
+    if (meta.lastModified) fields.push(`${t('lastModified')}: ${formatDate(meta.lastModified)}`)
+    const nodes = fields.map((value) => {
+      const span = document.createElement('span')
+      span.textContent = value
+      return span
+    })
+    footer.replaceChildren(...nodes)
+    footer.classList.add('bordered')
+  }
+
+  /** @param {PreviewItem} item */
   async preview(item) {
+    const generation = ++this.#loadGeneration
     const key = item.key
     this.#currentKey = key
     this.#currentText = ''
     this.#currentUrl = ''
+
     const dialog = /** @type {HTMLDialogElement} */ ($('#preview-dialog'))
     const body = $('#preview-body')
     const footer = $('#preview-footer')
-    const filename = $('#preview-filename')
     const copyBtn = /** @type {HTMLElement} */ ($('#preview-copy'))
     const copyTextBtn = /** @type {HTMLElement} */ ($('#preview-copy-text'))
     const copyImageBtn = /** @type {HTMLElement} */ ($('#preview-copy-image'))
 
-    filename.textContent = extractFileName(key)
-    body.innerHTML = '<div style="color:var(--text-tertiary)">Loading...</div>'
-    footer.innerHTML = ''
+    $('#preview-filename').textContent = extractFileName(key)
+    footer.replaceChildren()
     footer.classList.remove('bordered')
     copyBtn.hidden = true
     copyTextBtn.hidden = true
     copyImageBtn.hidden = true
-    dialog.showModal()
+    this.#showMessage(t('previewLoading'), 'loading')
+    this.#updateNavigation()
+    if (!dialog.open) dialog.showModal()
+
+    // Resolve URLs and metadata without letting stale requests repaint another file.
+    const isCurrent = () => generation === this.#loadGeneration && dialog.open
 
     try {
       let realContentType = getMimeType(key)
       try {
         const head = await this.#r2.headObject(key)
+        if (!isCurrent()) return
         if (head.contentType) realContentType = head.contentType
-      } catch {}
+      } catch {
+        if (!isCurrent()) return
+      }
 
-      const meta = {
+      this.#renderMetadata({
         contentLength: item.size ?? 0,
         contentType: realContentType,
         lastModified: item.lastModified ? new Date(item.lastModified) : undefined,
-      }
+      })
 
-      footer.classList.add('bordered')
-      footer.innerHTML = `
-        <span>${t('size')}: ${filesize(meta.contentLength)}</span>
-        <span>${t('contentType')}: ${meta.contentType || 'unknown'}</span>
-        ${meta.lastModified ? `<span>${t('lastModified')}: ${formatDate(meta.lastModified)}</span>` : ''}
-      `
+      if (IMAGE_RE.test(key) || VIDEO_RE.test(key) || AUDIO_RE.test(key) || TEXT_RE.test(key)) {
+        const url = this.#r2.getPublicUrl(key) ?? (await this.#r2.getPresignedUrl(key))
+        if (!isCurrent()) return
+        this.#currentUrl = url
 
-      if (IMAGE_RE.test(key)) {
-        const url = this.#r2.getPublicUrl(key) ?? (await this.#r2.getPresignedUrl(key))
-        this.#currentUrl = url
-        body.innerHTML = ''
-        const img = document.createElement('img')
-        img.src = url
-        img.alt = extractFileName(key)
-        body.appendChild(img)
-        copyImageBtn.dataset.tooltip = t('copyImage')
-        copyImageBtn.hidden = false
-        copyBtn.dataset.tooltip = t('copyLink')
+        if (IMAGE_RE.test(key)) {
+          const img = document.createElement('img')
+          img.alt = extractFileName(key)
+          img.src = url
+          body.replaceChildren(img)
+          copyImageBtn.hidden = false
+        } else if (VIDEO_RE.test(key)) {
+          const video = document.createElement('video')
+          video.src = url
+          video.controls = true
+          video.preload = 'metadata'
+          body.replaceChildren(video)
+        } else if (AUDIO_RE.test(key)) {
+          const audio = document.createElement('audio')
+          audio.src = url
+          audio.controls = true
+          audio.preload = 'metadata'
+          body.replaceChildren(audio)
+        } else {
+          const res = await this.#r2.getObject(key)
+          if (!isCurrent()) return
+          const text = await res.text()
+          if (!isCurrent()) return
+          this.#currentText = text
+          const pre = document.createElement('pre')
+          pre.textContent = text
+          body.replaceChildren(pre)
+          copyTextBtn.hidden = false
+        }
         copyBtn.hidden = false
-      } else if (VIDEO_RE.test(key)) {
-        const url = this.#r2.getPublicUrl(key) ?? (await this.#r2.getPresignedUrl(key))
-        this.#currentUrl = url
-        body.innerHTML = ''
-        const video = document.createElement('video')
-        video.src = url
-        video.controls = true
-        body.appendChild(video)
-        copyBtn.dataset.tooltip = t('copyLink')
-        copyBtn.hidden = false
-      } else if (AUDIO_RE.test(key)) {
-        const url = this.#r2.getPublicUrl(key) ?? (await this.#r2.getPresignedUrl(key))
-        this.#currentUrl = url
-        body.innerHTML = ''
-        const audio = document.createElement('audio')
-        audio.src = url
-        audio.controls = true
-        body.appendChild(audio)
-        copyBtn.dataset.tooltip = t('copyLink')
-        copyBtn.hidden = false
-      } else if (TEXT_RE.test(key)) {
-        const url = this.#r2.getPublicUrl(key) ?? (await this.#r2.getPresignedUrl(key))
-        this.#currentUrl = url
-        const res = await this.#r2.getObject(key)
-        const text = await res.text()
-        this.#currentText = text
-        body.innerHTML = ''
-        const pre = document.createElement('pre')
-        pre.textContent = text
-        body.appendChild(pre)
-        copyBtn.dataset.tooltip = t('copyLink')
-        copyBtn.hidden = false
-        copyTextBtn.dataset.tooltip = t('copyText')
-        copyTextBtn.hidden = false
       } else {
-        body.innerHTML = `<p style="color:var(--text-tertiary)">${t('previewNotAvailable')}</p>`
+        this.#showMessage(t('previewNotAvailable'), 'empty')
       }
-    } catch (/** @type {any} */ err) {
-      const errP = document.createElement('p')
-      errP.style.color = 'var(--text-danger)'
-      errP.textContent = err.message
-      body.innerHTML = ''
-      body.appendChild(errP)
+    } catch {
+      if (!isCurrent()) return
+      this.#showMessage(t('previewLoadFailed'), 'error')
     }
   }
 

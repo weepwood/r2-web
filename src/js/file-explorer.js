@@ -31,6 +31,7 @@ class FileExplorer {
   /** @type {((count: number) => void) | null} */
   #onSelectionChange = null
   #loadGen = 0
+  #filterQuery = ''
 
   /** @param {R2Client} r2 @param {UIManager} ui */
   constructor(r2, ui) {
@@ -110,7 +111,7 @@ class FileExplorer {
   }
 
   selectAll() {
-    const cards = /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('#file-grid .file-card'))
+    const cards = /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('#file-grid .file-card:not([hidden])'))
     cards.forEach((card) => {
       const key = card.dataset.key ?? ''
       const isFolder = card.dataset.isFolder === 'true'
@@ -120,6 +121,35 @@ class FileExplorer {
       if (cb) cb.checked = true
     })
     this.#onSelectionChange?.(this.#selection.size)
+  }
+
+  /** @param {string} query */
+  setFilterQuery(query) {
+    const normalized = query.trim().toLocaleLowerCase()
+    if (this.#filterQuery === normalized) return
+    this.clearSelection()
+    this.#filterQuery = normalized
+    this.#applyFilter()
+  }
+
+  #applyFilter() {
+    const cards = /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('#file-grid .file-card'))
+    let matched = 0
+    for (const card of cards) {
+      const name = extractFileName(card.dataset.key ?? '').toLocaleLowerCase()
+      const visible = !this.#filterQuery || name.includes(this.#filterQuery)
+      card.hidden = !visible
+      if (visible) matched++
+    }
+
+    const isFiltering = this.#filterQuery.length > 0
+    $('#filter-empty-state').hidden = !isFiltering || matched > 0 || this.#loadedItems.length === 0
+
+    const countEl = $('#item-count')
+    countEl.textContent = isFiltering
+      ? t('itemsFiltered', { count: matched, total: this.#loadedItems.length })
+      : t('itemsTotal', { count: this.#loadedItems.length })
+    countEl.hidden = this.#loadedItems.length === 0
   }
 
   /** @param {string} sortBy */
@@ -139,6 +169,7 @@ class FileExplorer {
     $('#file-grid').innerHTML = ''
     this.#renderItems(this.#sortItems(this.#loadedItems))
     this.#restoreSelectionUI()
+    this.#applyFilter()
   }
 
   #restoreSelectionUI() {
@@ -157,6 +188,10 @@ class FileExplorer {
   /** @param {string} prefix */
   async navigate(prefix) {
     this.clearSelection()
+    this.#filterQuery = ''
+    const searchInput = /** @type {HTMLInputElement | null} */ (document.querySelector('#file-filter-input'))
+    if (searchInput) searchInput.value = ''
+    $('#file-filter-clear').hidden = true
     this.#prefix = prefix
     this.#continuationToken = ''
     this.#loadedItems = []
@@ -210,9 +245,7 @@ class FileExplorer {
         this.#restoreSelectionUI()
       }
 
-      const countEl = $('#item-count')
-      countEl.textContent = t('itemsTotal', { count: this.#loadedItems.length })
-      countEl.hidden = this.#loadedItems.length === 0
+      this.#applyFilter()
       $('#load-more').hidden = true
     } catch (/** @type {any} */ err) {
       if (isInitial) this.#ui.hideSkeleton()
@@ -243,11 +276,7 @@ class FileExplorer {
   }
 
   updateCountDisplay() {
-    if (this.#loadedItems.length === 0) return
-    const isTruncated = !!this.#continuationToken
-    $('#item-count').textContent = isTruncated
-      ? t('itemsPartial', { count: this.#loadedItems.length })
-      : t('itemsTotal', { count: this.#loadedItems.length })
+    this.#applyFilter()
   }
 
   /** @param {FileItem[]} items @returns {FileItem[]} */
