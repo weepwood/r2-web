@@ -91,3 +91,14 @@ test('filter and navigation cancel outdated requests so new thumbnails do not st
   assert.match(explorer, /#resetThumbnails\(\) \{[\s\S]*?this\.#thumbnailObserver\.disconnect\(\)/)
   assert.match(explorer, /this\.#resetThumbnails\(\)\s*this\.#applyFilter\(\)/)
 })
+
+test('R2 object listing is one bounded page at a time with a visible load-more control', () => {
+  const explorer = readFileSync(new URL('../src/js/file-explorer.js', import.meta.url), 'utf8')
+  const html = readFileSync(new URL('../src/index.html', import.meta.url), 'utf8')
+  assert.match(explorer, /#loadingPageGeneration = -1/)
+  assert.match(explorer, /this\.#r2\.listObjects\(this\.#prefix, this\.#continuationToken\)/)
+  assert.doesNotMatch(explorer, /\} while \(this\.#continuationToken\)/)
+  assert.match(explorer, /\$\('#load-more'\)\.hidden = !this\.#continuationToken/)
+  assert.match(explorer, /t\('itemsPartial'/)
+  assert.match(html, /id="load-more-hint"/)
+})
