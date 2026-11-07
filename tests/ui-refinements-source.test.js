@@ -103,3 +103,16 @@ test('upload panel shows real batch progress and handles network errors', () => 
   assert.match(app, /panel\.classList\.toggle\('is-collapsed'\)/)
   assert.match(styles, /\.upload-panel\.is-collapsed \.upload-panel-body/)
 })
+
+test('rapid preview reopen and overlapping upload batches cannot overwrite newer UI state', () => {
+  const preview = readFileSync(new URL('../src/js/file-preview.js', import.meta.url), 'utf8')
+  const upload = readFileSync(new URL('../src/js/upload-manager.js', import.meta.url), 'utf8')
+
+  assert.match(preview, /dialog\.addEventListener\('close', \(\) => \{\s*\/\/[^\n]*\s*if \(dialog\.open\) return/)
+  assert.match(preview, /const isCurrent = \(\) => generation === this\.#loadGeneration && dialog\.open/)
+  assert.match(upload, /#panelBatchGeneration = 0/)
+  assert.match(upload, /const generation = \+\+this\.#panelBatchGeneration/)
+  assert.match(upload, /const ownsPanel = \(\) => generation === this\.#panelBatchGeneration/)
+  assert.match(upload, /if \(ownsPanel\(\)\) \{\s*panel\.dataset\.state = fail/)
+  assert.match(upload, /upload-\$\{generation\}-\$\{i\}-\$\{Date\.now\(\)\}/)
+})
