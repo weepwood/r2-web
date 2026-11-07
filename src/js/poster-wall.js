@@ -379,7 +379,9 @@ class PosterWall {
         this.#nodes.set(tile.key, node)
         this.#canvas.append(node)
         this.#enqueueImage(tile, node)
-        if (this.#entranceWave) {
+        // Limit first-paint animation work on low-end GPUs. Newly culled-in
+        // cards mount at their destination without replaying the opening wave.
+        if (this.#entranceWave && this.#nodes.size <= 48) {
           const screenX = tile.x * scale + this.#camera.x
           const screenY = tile.y * scale + this.#camera.y
           const delay = Math.min(290, Math.max(0, (screenX + screenY) * 0.11))
