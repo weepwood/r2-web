@@ -92,6 +92,21 @@ export function zoomAt(camera, px, py, desired) {
 }
 
 /**
+ * Preserve a tile's on-screen center when responsive geometry changes.
+ * Used when switching between desktop and narrow-screen mosaic templates.
+ * @param {{x:number,y:number,scale:number}} camera
+ * @param {{x:number,y:number,w:number,h:number}} before
+ * @param {{x:number,y:number,w:number,h:number}} after
+ */
+export function preserveTileAnchor(camera, before, after) {
+  return {
+    x:camera.x + ((before.x + before.w / 2) - (after.x + after.w / 2)) * camera.scale,
+    y:camera.y + ((before.y + before.h / 2) - (after.y + after.h / 2)) * camera.scale,
+    scale:camera.scale,
+  }
+}
+
+/**
  * Do two rects have a visible gutter? The base mosaic already guarantees 6px.
  * @param {{x:number,y:number,w:number,h:number}} a
  * @param {{x:number,y:number,w:number,h:number}} b
