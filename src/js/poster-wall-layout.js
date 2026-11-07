@@ -92,50 +92,100 @@ export function zoomAt(camera, px, py, desired) {
 }
 
 /**
- * Local expansion in the original position, with near neighbors repelled
- * outside the expanded bounds. No movement of far-away motifs.
+ * Do two rects have a visible gutter? The base mosaic already guarantees 6px.
+ * @param {{x:number,y:number,w:number,h:number}} a
+ * @param {{x:number,y:number,w:number,h:number}} b
+ * @param {number} [gap]
+ */
+function isSeparated(a, b, gap = WALL_GAP) {
+  return a.x + a.w + gap <= b.x || b.x + b.w + gap <= a.x ||
+    a.y + a.h + gap <= b.y || b.y + b.h + gap <= a.y
+}
+
+/**
+ * Find the nearest empty spot without moving already placed rectangles.
+ * A bounded best-first search projects to exact blocker edges, avoiding
+ * infinite incremental physics iterations and accidental overlaps.
+ * @param {{x:number,y:number,w:number,h:number}} original
+ * @param {{x:number,y:number,w:number,h:number}[]} placed
+ */
+function nearestFreePosition(original, placed) {
+  const pending = [{...original, cost: 0}]
+  const visited = new Set([`${original.x.toFixed(2)},${original.y.toFixed(2)}`])
+  let attempts = 0
+  while (pending.length && attempts++ < 800) {
+    pending.sort((a, b) => a.cost - b.cost)
+    const current = pending.shift()
+    if (!current) break
+    const blocker = placed.find((existing) => !isSeparated(current, existing))
+    if (!blocker) return {x:current.x,y:current.y,w:original.w,h:original.h}
+
+    const alternatives = [
+      [blocker.x - original.w - WALL_GAP, current.y],
+      [blocker.x + blocker.w + WALL_GAP, current.y],
+      [current.x, blocker.y - original.h - WALL_GAP],
+      [current.x, blocker.y + blocker.h + WALL_GAP],
+    ]
+    for (const [x, y] of alternatives) {
+      const id = `${x.toFixed(2)},${y.toFixed(2)}`
+      if (visited.has(id)) continue
+      visited.add(id)
+      pending.push({
+        x, y, w:original.w, h:original.h,
+        cost:(x - original.x) ** 2 + (y - original.y) ** 2,
+      })
+    }
+  }
+
+  // The field is open-ended: if a dense cluster exhausts the local search,
+  // put this tile to the right of the occupied region rather than overlap.
+  const right = Math.max(...placed.map((rect) => rect.x + rect.w))
+  return {...original, x:right + WALL_GAP}
+}
+
+/**
+ * Expand the active tile and resolve neighbors without any rectangle overlap.
+ *
+ * Place distant tiles first so they keep their original coordinates; tiles
+ * close to the focus choose the nearest free position. As the wall is dense,
+ * there can be a small local chain of displaced neighbors at the boundary.
  * @param {WallTile[]} layout
  * @param {string|null} activeKey
  * @returns {Map<string,{x:number,y:number,w:number,h:number}>}
  */
 export function focusReflow(layout, activeKey) {
-  const positions = new Map(layout.map(({ key, x, y, w, h }) => [key, { x, y, w, h }]))
+  const positions = new Map(layout.map(({key,x,y,w,h}) => [key,{x,y,w,h}]))
   if (!activeKey) return positions
   const current = positions.get(activeKey)
   if (!current) return positions
 
-  const w = Math.max(current.w * 1.58, 470)
-  const h = Math.max(current.h * 1.5, 370)
+  // Reduced expansion still clearly emphasizes the image, but spares more of
+  // the neighboring mosaic from movement.
+  const width = Math.max(current.w * 1.44, 430)
+  const height = Math.max(current.h * 1.42, 350)
   const expanded = {
-    x: current.x - (w - current.w) * 0.3,
-    y: current.y - (h - current.h) * 0.24,
-    w, h,
+    x:current.x - (width - current.w) * .3,
+    y:current.y - (height - current.h) * .25,
+    w:width, h:height,
   }
   positions.set(activeKey, expanded)
 
-  const padding = 14
-  const inflated = {
-    x: expanded.x - padding,
-    y: expanded.y - padding,
-    w: expanded.w + padding * 2,
-    h: expanded.h + padding * 2,
-  }
-  for (const tile of layout) {
-    if (tile.key === activeKey) continue
-    const rect = positions.get(tile.key)
-    if (!rect || !intersects(rect, inflated)) continue
-    const left = rect.x + rect.w - inflated.x
-    const right = inflated.x + inflated.w - rect.x
-    const up = rect.y + rect.h - inflated.y
-    const down = inflated.y + inflated.h - rect.y
-    const offsets = [
-      {x:-left, y:0, distance:left},
-      {x:right, y:0, distance:right},
-      {x:0, y:-up, distance:up},
-      {x:0, y:down, distance:down},
-    ]
-    const nearest = offsets.reduce((best, candidate) => candidate.distance < best.distance ? candidate : best)
-    positions.set(tile.key, {...rect, x: rect.x + nearest.x, y: rect.y + nearest.y})
+  const centerX = expanded.x + expanded.w / 2
+  const centerY = expanded.y + expanded.h / 2
+  const distance = (rect) => (rect.x + rect.w / 2 - centerX) ** 2 +
+    (rect.y + rect.h / 2 - centerY) ** 2
+
+  const neighbors = layout
+    .filter((tile) => tile.key !== activeKey)
+    .sort((a, b) => distance(b) - distance(a))
+  const placed = [expanded]
+
+  for (const tile of neighbors) {
+    const original = positions.get(tile.key)
+    if (!original) continue
+    const next = nearestFreePosition(original, placed)
+    positions.set(tile.key, next)
+    placed.push(next)
   }
   return positions
 }
