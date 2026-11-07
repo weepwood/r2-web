@@ -18,6 +18,12 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* Author-level display rules must not override the HTML hidden attribute. */
+.poster-wall[hidden],
+.poster-wall [hidden] {
+  display: none !important;
+}
+
 .poster-wall-viewport {
   position: absolute;
   inset: 0;
