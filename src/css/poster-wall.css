@@ -44,7 +44,8 @@
   width: 0;
   height: 0;
   transform-origin: 0 0;
-  will-change: transform;
+  /* Avoid a persistent GPU surface as large as the whole mosaic.
+     On a dense wall that surface can exceed the texture budget. */
   contain: layout style;
 }
 
@@ -65,6 +66,16 @@
   -webkit-tap-highlight-color: transparent;
 }
 .poster-tile:focus-visible { outline: 2px solid #f7f4ee; outline-offset: -2px; }
+/* A restrained entrance wave, played once only for initially mounted tiles. */
+.poster-tile.is-entering {
+  animation: wall-poster-arrive 560ms cubic-bezier(.22,1,.36,1) both;
+  animation-delay: var(--wall-entrance-delay, 0ms);
+}
+@keyframes wall-poster-arrive {
+  0% { opacity: 0; transform: translate3d(0,34px,0) scale(.965); }
+  72% { opacity: 1; transform: translate3d(0,-3px,0) scale(1.005); }
+  100% { opacity: 1; transform: none; }
+}
 .poster-tile.is-active { box-shadow: 0 0 0 1px rgb(247 244 238 / 28%), 0 10px 32px rgb(0 0 0 / 22%); }
 .poster-tile-media, .poster-tile-shade, .poster-tile-copy { position: absolute; inset: 0; }
 
@@ -180,14 +191,21 @@
   opacity: 1;
 }
 
-/* Focus hierarchy: adjacent work remains legible and spatially recognizable. */
-.poster-wall.has-active .poster-tile:not(.is-active) {
-  filter: brightness(.63) saturate(.76);
-  transition: filter 190ms ease;
+/* Darken without per-tile CSS filters: filters trigger costly offscreen
+   surfaces during a transform-heavy pan. A simple poster shade composites
+   cheaply and keeps the surrounding artwork spatially recognizable. */
+.poster-tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background: #070707;
+  opacity: 0;
+  transition: opacity 190ms ease;
 }
-.poster-wall.has-active .poster-tile:not(.is-active):is(:hover, :focus-visible) {
-  filter: brightness(.88) saturate(1);
-}
+.poster-wall.has-active .poster-tile:not(.is-active)::after { opacity: .39; }
+.poster-wall.has-active .poster-tile:not(.is-active):is(:hover, :focus-visible)::after { opacity: .13; }
 
 /* Chrome: no giant heading, only a quiet corner label and contextual controls. */
 .poster-wall-header, .poster-wall-hud, .poster-wall-controls,
@@ -339,6 +357,9 @@
   .poster-wall-action { min-height: 37px; padding: 0 13px; }
   .poster-tile.is-active .poster-tile-title { font-size: 28px; }
   .poster-tile-copy { padding: 12px 16px 15px; }
+}
+@media (hover: none) and (pointer: coarse) {
+  .poster-tile.is-entering { animation-duration: 380ms; }
 }
 @media (prefers-reduced-motion: reduce) {
   .poster-wall *,
