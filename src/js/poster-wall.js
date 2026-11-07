@@ -361,6 +361,8 @@ class PosterWall {
   /** @param {Map<string,DOMRect>} [previous] */
   #render(previous) {
     if (!this.isOpen) return
+    this.#root.dataset.wallRenderPasses = String(
+      Number(this.#root.dataset.wallRenderPasses || 0) + 1)
     this.#paintCamera()
     const { scale } = this.#camera
     const bounds = cameraBounds(this.#camera, this.#viewport.clientWidth,
@@ -441,6 +443,7 @@ class PosterWall {
     focusActions.hidden = !actionsVisible
     emptyState.hidden = this.#layout.length > 0
     moreControl.hidden = !this.#hasMore
+    this.#root.dataset.wallMountedTiles = String(this.#nodes.size)
     this.#updateHud()
   }
 
