@@ -161,6 +161,19 @@
 .poster-tile.is-active .poster-tile-kicker { display: block; }
 .poster-tile.is-active .poster-tile-copy { padding: 18px clamp(18px, 2.2vw, 34px) 30px; }
 
+/* Zoom-aware editorial restraint: overview is an image map, not a label wall. */
+.poster-wall[data-zoom-level='overview'] .poster-tile:not(.is-active):not(:hover):not(:focus-visible) .poster-tile-copy {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.poster-wall[data-zoom-level='overview'] .poster-tile:not(.is-active):not(:hover):not(:focus-visible) .poster-tile-shade {
+  opacity: 0;
+}
+.poster-wall[data-zoom-level='overview'] .poster-tile:is(:hover, :focus-visible, .is-active) .poster-tile-copy,
+.poster-wall[data-zoom-level='overview'] .poster-tile:is(:hover, :focus-visible, .is-active) .poster-tile-shade {
+  opacity: 1;
+}
+
 /* Focus hierarchy: adjacent work remains legible and spatially recognizable. */
 .poster-wall.has-active .poster-tile:not(.is-active) {
   filter: brightness(.63) saturate(.76);
