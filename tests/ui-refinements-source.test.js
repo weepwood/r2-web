@@ -31,3 +31,18 @@ test('responsive, density, themes and motion preference are preserved', () => {
   assert.match(styles, /prefers-reduced-motion: reduce/)
   assert.match(styles, /pointer: coarse/)
 })
+
+test('local filter has a dedicated empty state and does not change R2 client logic', () => {
+  const explorer = readFileSync(new URL('../src/js/file-explorer.js', import.meta.url), 'utf8')
+  const app = readFileSync(new URL('../src/js/app.js', import.meta.url), 'utf8')
+  const i18n = readFileSync(new URL('../src/js/i18n.js', import.meta.url), 'utf8')
+
+  for (const id of ['file-filter-input', 'file-filter-clear', 'filter-empty-state', 'filter-empty-clear-btn']) {
+    assert.match(html, new RegExp('id="' + id + '"'))
+  }
+  assert.match(explorer, /setFilterQuery\(query\)/)
+  assert.match(explorer, /\.file-card:not\(\[hidden\]\)/)
+  assert.match(app, /filterInput\.addEventListener\('input'/)
+  assert.match(i18n, /filterNoResults:/)
+  assert.match(i18n, /itemsFiltered:/)
+})
