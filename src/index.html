@@ -77,19 +77,19 @@
         <div class="dialog-body">
           <!-- Tab Navigation -->
           <div class="config-tabs" role="tablist">
-            <button type="button" class="config-tab-btn" role="tab" aria-selected="true" data-tab="preferences">
+            <button type="button" class="config-tab-btn" role="tab" id="config-tab-preferences" aria-controls="config-panel-preferences" aria-selected="true" data-tab="preferences">
               <span id="tab-preferences">偏好设置</span>
             </button>
-            <button type="button" class="config-tab-btn" role="tab" data-tab="r2">
+            <button type="button" class="config-tab-btn" role="tab" id="config-tab-r2" aria-controls="config-panel-r2" aria-selected="false" data-tab="r2">
               <span id="tab-r2">R2 设置</span>
             </button>
-            <button type="button" class="config-tab-btn" role="tab" data-tab="upload">
+            <button type="button" class="config-tab-btn" role="tab" id="config-tab-upload" aria-controls="config-panel-upload" aria-selected="false" data-tab="upload">
               <span id="tab-upload">上传设置</span>
             </button>
-            <button type="button" class="config-tab-btn" role="tab" data-tab="compression">
+            <button type="button" class="config-tab-btn" role="tab" id="config-tab-compression" aria-controls="config-panel-compression" aria-selected="false" data-tab="compression">
               <span id="tab-compression">压缩设置</span>
             </button>
-            <button type="button" class="config-tab-btn" role="tab" data-tab="about">
+            <button type="button" class="config-tab-btn" role="tab" id="config-tab-about" aria-controls="config-panel-about" aria-selected="false" data-tab="about">
               <span id="tab-about">关于</span>
             </button>
           </div>
@@ -97,7 +97,7 @@
           <!-- Tab Panels Container -->
           <div class="config-tab-panels">
             <!-- Tab 1: Preferences -->
-            <form class="config-tab-panel" role="tabpanel" data-panel="preferences">
+            <form class="config-tab-panel" role="tabpanel" id="config-panel-preferences" aria-labelledby="config-tab-preferences" data-panel="preferences">
               <div class="config-section">
                 <div class="field">
                   <div class="field-label">
@@ -143,7 +143,7 @@
             </form>
 
             <!-- Tab 2: R2 Config -->
-            <form class="config-tab-panel" role="tabpanel" data-panel="r2" hidden>
+            <form class="config-tab-panel" role="tabpanel" id="config-panel-r2" aria-labelledby="config-tab-r2" data-panel="r2" hidden>
               <div class="config-section">
                 <div class="field">
                   <div class="field-label">
@@ -200,7 +200,7 @@
             </form>
 
             <!-- Tab 3: Upload -->
-            <form class="config-tab-panel" role="tabpanel" data-panel="upload" hidden>
+            <form class="config-tab-panel" role="tabpanel" id="config-panel-upload" aria-labelledby="config-tab-upload" data-panel="upload" hidden>
               <div class="config-section">
                 <div class="field">
                   <div class="field-label">
@@ -259,7 +259,7 @@
             </form>
 
             <!-- Tab 4: Compression -->
-            <form class="config-tab-panel" role="tabpanel" data-panel="compression" hidden>
+            <form class="config-tab-panel" role="tabpanel" id="config-panel-compression" aria-labelledby="config-tab-compression" data-panel="compression" hidden>
               <div class="config-section">
                 <div class="field">
                   <div class="field-label">
@@ -316,7 +316,7 @@
             </form>
 
             <!-- Tab 5: About -->
-            <div class="config-tab-panel" role="tabpanel" data-panel="about" hidden>
+            <div class="config-tab-panel" role="tabpanel" id="config-panel-about" aria-labelledby="config-tab-about" data-panel="about" hidden>
               <div class="about-section">
                 <div class="about-header">
                   <img src="favicon.ico" alt="R2 Web" class="about-icon" />
