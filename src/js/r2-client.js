@@ -199,6 +199,21 @@ class R2Client {
     }
   }
 
+  /**
+   * CopyObject and self-copy metadata updates can return HTTP 200 while the
+   * XML body contains an S3 error. Do not report these operations as success.
+   * @param {Response} response
+   */
+  async #assertCopyResponse(response) {
+    this.#assertOk(response)
+    const body = await response.text()
+    if (!body.trim()) return
+    const xml = new DOMParser().parseFromString(body, 'application/xml')
+    const code = xml.querySelector('Error > Code')?.textContent
+    if (code) throw new Error('R2_COPY_' + code)
+    if (xml.querySelector('parsererror')) throw new Error('R2_COPY_INVALID_XML')
+  }
+
   /** @param {string} key */
   async deleteObject(key) {
     const url = `${/** @type {ConfigManager} */ (this.#config).getBucketUrl()}/${encodeS3Key(key)}`
@@ -217,15 +232,7 @@ class R2Client {
         'x-amz-copy-source': `/${cfg.bucket}/${encodeS3Key(src)}`,
       },
     })
-    this.#assertOk(res)
-    // S3 CopyObject can return HTTP 200 with an embedded XML Error.
-    // Never report success and delete a source after an incomplete copy.
-    const body = await res.text()
-    if (body.trim()) {
-      const document = new DOMParser().parseFromString(body, 'application/xml')
-      const code = document.querySelector('Error > Code')?.textContent
-      if (code) throw new Error('R2_COPY_' + code)
-    }
+    await this.#assertCopyResponse(res)
     this.#presignedGetCache.delete(url)
   }
 
@@ -241,7 +248,7 @@ class R2Client {
         'Content-Type': contentType,
       },
     })
-    this.#assertOk(res)
+    await this.#assertCopyResponse(res)
     this.#presignedGetCache.delete(url)
   }
 
