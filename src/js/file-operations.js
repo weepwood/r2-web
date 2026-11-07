@@ -4,6 +4,7 @@ import { FileExplorer } from './file-explorer.js'
 import { R2Client } from './r2-client.js'
 import { UIManager } from './ui-manager.js'
 import { getErrorMessage, extractFileName } from './utils.js'
+import { destinationConflict } from './file-operation-guards.js'
 
 class FileOperations {
   /** @type {R2Client} */
@@ -85,11 +86,14 @@ class FileOperations {
       validate: (v) => {
         const illegal = v.match(/[\\:*?"<>|\x00-\x1F]/g)
         if (illegal) return t('pathInvalidChars', { chars: [...new Set(illegal)].join('  ') })
-        if (v === key) return t('copySamePath')
+        const conflict = destinationConflict(key, isFolder ? FileOperations.#toFolderPrefix(v) : v, isFolder)
+        if (conflict === 'same') return t('copySamePath')
+        if (conflict === 'nested') return t('folderInsideItself')
         return null
       },
     })
     if (!dest) return
+    if (destinationConflict(key, isFolder ? FileOperations.#toFolderPrefix(dest) : dest, isFolder)) return
 
     try {
       this.#ui.toast(t('copying', { name, destName: dest }), 'info')
@@ -132,14 +136,18 @@ class FileOperations {
 
     const destFolder = await this.#ui.prompt(t('moveTitle'), t('moveLabel'), currentPrefix, {
       preview: (v) => '→ ' + resolveDest(v),
-      validate: (v) => (resolveDest(v) === key ? t('moveSamePath') : null),
+      validate: (v) => {
+        const conflict = destinationConflict(key, resolveDest(v), isFolder)
+        return conflict === 'same' ? t('moveSamePath') :
+          conflict === 'nested' ? t('folderInsideItself') : null
+      },
     })
 
     if (destFolder === null) return
 
     const dest = resolveDest(destFolder)
 
-    if (dest === key) return
+    if (destinationConflict(key, dest, isFolder)) return
 
     try {
       this.#ui.toast(t('moving', { name, destName: dest }), 'info')
@@ -259,11 +267,12 @@ class FileOperations {
     const destFolder = await this.#ui.prompt(t('batchMoveTitle'), t('batchMoveLabel'), currentPrefix, {
       validate: (v) => {
         const folder = FileOperations.#toFolderPrefix(v)
-        const allSame = items.every((item) => {
+        const problems = items.map((item) => {
           const name = extractFileName(item.key)
-          return folder + name + (item.isFolder ? '/' : '') === item.key
+          return destinationConflict(item.key, folder + name + (item.isFolder ? '/' : ''), item.isFolder)
         })
-        return allSame ? t('batchMoveSamePath') : null
+        if (problems.includes('nested')) return t('folderInsideItself')
+        return problems.every((problem) => problem === 'same') ? t('batchMoveSamePath') : null
       },
     })
     if (destFolder === null) return false
@@ -276,7 +285,7 @@ class FileOperations {
     for (const item of items) {
       const name = extractFileName(item.key)
       const dest = folder + name + (item.isFolder ? '/' : '')
-      if (dest === item.key) continue
+      if (destinationConflict(item.key, dest, item.isFolder)) continue
 
       try {
         if (item.isFolder) {
@@ -319,11 +328,12 @@ class FileOperations {
     const destFolder = await this.#ui.prompt(t('batchCopyTitle'), t('batchCopyLabel'), currentPrefix, {
       validate: (v) => {
         const folder = FileOperations.#toFolderPrefix(v)
-        const allSame = items.every((item) => {
+        const problems = items.map((item) => {
           const name = extractFileName(item.key)
-          return folder + name + (item.isFolder ? '/' : '') === item.key
+          return destinationConflict(item.key, folder + name + (item.isFolder ? '/' : ''), item.isFolder)
         })
-        return allSame ? t('batchCopySamePath') : null
+        if (problems.includes('nested')) return t('folderInsideItself')
+        return problems.every((problem) => problem === 'same') ? t('batchCopySamePath') : null
       },
     })
     if (destFolder === null) return false
@@ -336,7 +346,7 @@ class FileOperations {
     for (const item of items) {
       const name = extractFileName(item.key)
       const dest = folder + name + (item.isFolder ? '/' : '')
-      if (dest === item.key) continue
+      if (destinationConflict(item.key, dest, item.isFolder)) continue
 
       try {
         if (item.isFolder) {
@@ -524,11 +534,11 @@ class FileOperations {
     let token = ''
     do {
       const result = await this.#r2.listObjects(prefix, token)
-      for (const file of result.files) {
-        allKeys.push(file.key)
-      }
+      if (result.hasFolderMarker && !allKeys.includes(prefix)) allKeys.push(prefix)
+      for (const file of result.files) allKeys.push(file.key)
       for (const folder of result.folders) {
-        allKeys.push(folder.key)
+        // CommonPrefixes are virtual directories, not guaranteed R2 objects.
+        // Recurse into them; only exact marker objects may be copied/deleted.
         const subKeys = await this.#collectAllKeys(folder.key)
         allKeys.push(...subKeys)
       }
