@@ -1,7 +1,7 @@
 import { getThumbnailMode, resolveThumbnailPolicy, selectThumbnailWidth } from './thumbnail-utils.js'
 import { extractFileName } from './utils.js'
 import { t } from './i18n.js'
-import { buildWallLayout, cameraBounds, focusReflow, intersects, zoomAt } from './poster-wall-layout.js'
+import { buildWallLayout, cameraBounds, focusReflow, intersects, preserveTileAnchor, zoomAt } from './poster-wall-layout.js'
 
 /** @typedef {{key:string,size?:number,lastModified?:number|string}} ImageItem */
 /** @typedef {{key:string,node:HTMLButtonElement,img:HTMLImageElement,cancel:()=>void,active:boolean,stopped:boolean,requestedWidth:number}} ImageTask */
@@ -55,6 +55,7 @@ class PosterWall {
   #dragged = false
   #gestureUsedPinch = false
   #columnCount = 3
+  #viewportSize = { width: 0, height: 0 }
   /** @type {Map<HTMLElement,boolean>} */
   #backgroundInert = new Map()
 
@@ -79,19 +80,50 @@ class PosterWall {
       }
     })
     this.#bindEvents()
-    new ResizeObserver(() => {
-      if (!this.isOpen) return
-      const nextColumns = this.#viewport.clientWidth < 760 ? 2 : 3
-      if (nextColumns !== this.#columnCount) {
-        this.#columnCount = nextColumns
-        this.#recalculate()
-      }
-      this.#scheduleRender()
-    }).observe(this.#viewport)
+    new ResizeObserver(() => this.#handleResize()).observe(this.#viewport)
   }
 
   get isOpen() {
     return !this.#root.hidden
+  }
+
+  #handleResize() {
+    if (!this.isOpen) return
+    const width = this.#viewport.clientWidth
+    const height = this.#viewport.clientHeight
+    if (!width || !height) return
+    const previousSize = this.#viewportSize
+    if (previousSize.width === width && previousSize.height === height) return
+    this.#viewportSize = { width, height }
+    this.#cancelCameraMotion()
+    // Keep the midpoint of the current viewport steady on ordinary resizes.
+    this.#camera.x += (width - previousSize.width) / 2
+    this.#camera.y += (height - previousSize.height) / 2
+
+    const nextColumns = width < 760 ? 2 : 3
+    if (nextColumns === this.#columnCount) {
+      this.#scheduleRender()
+      return
+    }
+
+    const previousRects = this.#getVisualRects()
+    const centerX = (width / 2 - this.#camera.x) / this.#camera.scale
+    const centerY = (height / 2 - this.#camera.y) / this.#camera.scale
+    const anchor = this.#activeKey ?? this.#layout.reduce((best, tile) => {
+      const rect = this.#positions.get(tile.key)
+      const closest = best ? this.#positions.get(best) : null
+      if (!rect) return best
+      if (!closest) return tile.key
+      const distance = (r) => (r.x + r.w / 2 - centerX) ** 2 +
+        (r.y + r.h / 2 - centerY) ** 2
+      return distance(rect) < distance(closest) ? tile.key : best
+    }, /** @type {string | null} */ (null))
+    const before = anchor ? this.#positions.get(anchor) : null
+    this.#columnCount = nextColumns
+    this.#recalculate()
+    const after = anchor ? this.#positions.get(anchor) : null
+    if (before && after) this.#camera = preserveTileAnchor(this.#camera, before, after)
+    this.#render(previousRects)
   }
 
   /** @param {ImageItem[]} items @param {boolean} hasMore */
@@ -101,6 +133,7 @@ class PosterWall {
       return
     }
     this.#root.hidden = false
+    this.#viewportSize = { width: this.#viewport.clientWidth, height: this.#viewport.clientHeight }
     // Keep Tab inside the presentation, without blocking native top-layer dialogs.
     for (const sibling of this.#root.parentElement?.children ?? []) {
       if (!(sibling instanceof HTMLElement) || sibling === this.#root) continue
