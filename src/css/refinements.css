@@ -875,3 +875,45 @@ dialog .field select:focus {
     opacity: 1;
   }
 }
+
+/* Density settings should change the physical card size, not only the grid count. */
+#app .file-browser[data-density='compact'] .file-card {
+  min-height: 142px;
+}
+
+#app .file-browser[data-density='loose'] .file-card {
+  min-height: 196px;
+}
+
+#app .file-browser[data-view='list'] .file-card {
+  min-height: 64px;
+}
+
+@media (max-width: 640px) {
+  /* Allow a long bucket name to wrap without obscuring the account controls. */
+  #app .topbar {
+    align-items: flex-start;
+  }
+
+  #app .topbar-brand {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    gap: 5px 9px !important;
+  }
+
+  #app .bucket-switcher {
+    flex: 1 1 100%;
+    width: 100%;
+    margin: 0;
+  }
+
+  #app .bucket-switcher-select {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  #app .file-browser[data-density='compact'] .file-card,
+  #app .file-browser[data-density='loose'] .file-card {
+    min-height: 66px;
+  }
+}
