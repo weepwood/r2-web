@@ -1626,3 +1626,29 @@ dialog .field select:focus {
     animation: none !important;
   }
 }
+
+/* Keep large directories lightweight, with an explicit, scannable next-page control. */
+#app .load-more:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 11px;
+  padding: 20px 16px 35px;
+  margin: 18px auto 0;
+  color: var(--text-secondary);
+}
+
+#app #load-more-hint {
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+#app #load-more-btn {
+  min-width: 132px;
+  box-shadow: var(--surface-shadow);
+}
+
+#app #load-more-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
