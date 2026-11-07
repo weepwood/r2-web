@@ -236,9 +236,9 @@ class PosterWall {
     }
 
     this.#root.classList.toggle('has-active', Boolean(this.#activeKey))
-    document.querySelector('#wall-focus-actions').hidden = !this.#activeKey
-    document.querySelector('#wall-empty').hidden = this.#layout.length > 0
-    document.querySelector('#wall-more').hidden = !this.#hasMore
+    /** @type {HTMLElement} */ (document.querySelector('#wall-focus-actions')).hidden = !this.#activeKey
+    /** @type {HTMLElement} */ (document.querySelector('#wall-empty')).hidden = this.#layout.length > 0
+    /** @type {HTMLElement} */ (document.querySelector('#wall-more')).hidden = !this.#hasMore
     this.#updateHud()
   }
 
@@ -429,7 +429,7 @@ class PosterWall {
     this.#viewport.addEventListener('pointerdown', (event) => this.#pointerDown(event))
     this.#viewport.addEventListener('pointermove', (event) => this.#pointerMove(event))
     for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
-      this.#viewport.addEventListener(type, (event) => this.#pointerUp(event))
+      this.#viewport.addEventListener(type, (event) => this.#pointerUp(/** @type {PointerEvent} */ (event)))
     }
     this.#viewport.addEventListener('wheel', (event) => {
       event.preventDefault()
