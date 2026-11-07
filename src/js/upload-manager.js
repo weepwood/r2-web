@@ -178,6 +178,7 @@ class UploadManager {
   /** @type {ConfigManager} */
   #config
   #dragCounter = 0
+  #panelBatchGeneration = 0
 
   /** @param {R2Client} r2 @param {UIManager} ui @param {FileExplorer} explorer @param {ConfigManager} config */
   constructor(r2, ui, explorer, config) {
@@ -338,10 +339,14 @@ class UploadManager {
 
   /** @param {File[]} files @param {string} [overrideKey] */
   async uploadFiles(files, overrideKey) {
+    const generation = ++this.#panelBatchGeneration
+    const ownsPanel = () => generation === this.#panelBatchGeneration
     const panel = $('#upload-panel')
     const body = $('#upload-panel-body')
     const title = $('#upload-panel-title')
 
+    // A new batch takes over the task panel; previous uploads keep running
+    // but must not overwrite the new batch's progress or completion status.
     body.innerHTML = ''
     panel.hidden = false
     panel.classList.remove('is-collapsed')
@@ -351,6 +356,7 @@ class UploadManager {
     title.textContent = t('uploadPreparing')
 
     const updateOverallProgress = (completed, total) => {
+      if (!ownsPanel()) return
       const percent = total > 0 ? Math.round((completed / total) * 100) : 0
       $('#upload-panel-summary').textContent = `${completed} / ${total}`
       $('#upload-panel-percent').textContent = `${percent}%`
@@ -392,7 +398,7 @@ class UploadManager {
       ) {
         const choice = await this.#ui.chooseFilenameTemplatePath(currentPrefix, processedName, filenameTpl)
         if (!choice) {
-          panel.hidden = true
+          if (ownsPanel()) panel.hidden = true
           return
         }
         pathStrategy = choice
@@ -435,7 +441,7 @@ class UploadManager {
 
       const contentType = file.type || getMimeType(file.name)
 
-      const id = `upload-${i}-${Date.now()}`
+      const id = `upload-${generation}-${i}-${Date.now()}`
       const displayName = key.length > 40 ? '...' + key.slice(-37) : key
 
       const item = document.createElement('div')
@@ -456,7 +462,7 @@ class UploadManager {
       body.appendChild(item)
 
       const updateStatus = /** @param {string} msg */ (msg) => {
-        const statusEl = $(`#${id}-status`)
+        const statusEl = item.querySelector('.upload-item-status')
         if (statusEl) statusEl.textContent = msg
       }
       updateStatus(t('uploadWaiting'))
@@ -466,17 +472,19 @@ class UploadManager {
 
     // All files were skipped
     if (uploads.length === 0) {
-      panel.hidden = true
+      if (ownsPanel()) panel.hidden = true
       if (skippedCount > 0) {
         this.#ui.toast(t('uploadSkipped', { count: skippedCount }), 'info')
       }
       return
     }
 
-    panel.hidden = false
-    panel.dataset.state = 'uploading'
-    title.textContent = `${t('uploadProgress')} 0/${uploads.length}`
-    updateOverallProgress(0, uploads.length)
+    if (ownsPanel()) {
+      panel.hidden = false
+      panel.dataset.state = 'uploading'
+      title.textContent = `${t('uploadProgress')} 0/${uploads.length}`
+      updateOverallProgress(0, uploads.length)
+    }
 
     let completed = 0
     const results = await runWithConcurrency(
@@ -496,8 +504,10 @@ class UploadManager {
           throw e
         } finally {
           completed++
-          title.textContent = `${t('uploadProgress')} ${completed}/${uploads.length}`
-          updateOverallProgress(completed, uploads.length)
+          if (ownsPanel()) {
+            title.textContent = `${t('uploadProgress')} ${completed}/${uploads.length}`
+            updateOverallProgress(completed, uploads.length)
+          }
         }
       }),
       cfg.uploadConcurrency ?? 3,
@@ -505,10 +515,12 @@ class UploadManager {
 
     const success = results.filter((r) => r.status === 'fulfilled').length
     const fail = results.filter((r) => r.status === 'rejected').length
-    panel.dataset.state = fail === 0 ? 'done' : 'error'
-    $('#upload-panel-summary').textContent = fail === 0
-      ? t('uploadSuccess', { count: success })
-      : t('uploadPartialFail', { success, fail })
+    if (ownsPanel()) {
+      panel.dataset.state = fail === 0 ? 'done' : 'error'
+      $('#upload-panel-summary').textContent = fail === 0
+        ? t('uploadSuccess', { count: success })
+        : t('uploadPartialFail', { success, fail })
+    }
 
     if (fail === 0) {
       this.#ui.toast(t('uploadSuccess', { count: success }), 'success')
