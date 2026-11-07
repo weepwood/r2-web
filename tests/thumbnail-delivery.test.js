@@ -81,3 +81,13 @@ test('listing thumbnail loader uses a concurrency bound and preview still resolv
   assert.match(client, /#presignedGetCache = new Map\(\)/)
   assert.match(client, /3 \* 60_000/)
 })
+
+test('filter and navigation cancel outdated requests so new thumbnails do not stall', () => {
+  const explorer = readFileSync(new URL('../src/js/file-explorer.js', import.meta.url), 'utf8')
+  assert.match(explorer, /#thumbnailCancels = new Set\(\)/)
+  assert.match(explorer, /for \(const cancel of this\.#thumbnailCancels\) cancel\(\)/)
+  assert.match(explorer, /this\.#thumbnailCancels\.add\(cancel\)/)
+  assert.match(explorer, /this\.#thumbnailCancels\.delete\(cancel\)/)
+  assert.match(explorer, /#resetThumbnails\(\) \{[\s\S]*?this\.#thumbnailObserver\.disconnect\(\)/)
+  assert.match(explorer, /this\.#resetThumbnails\(\)\s*this\.#applyFilter\(\)/)
+})
