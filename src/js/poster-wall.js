@@ -5,6 +5,7 @@ import { t } from './i18n.js'
 import { buildWallLayout, cameraBounds, focusBlockReflow, focusReflow, intersects, preserveTileAnchor, zoomAt } from './poster-wall-layout.js'
 import { indexWallTiles, queryWallTiles } from './poster-wall-visibility.js'
 import { classifyWallWheel, focusedWallCamera, projectWallCoast, stepWheelDamping } from './poster-wall-motion.js'
+import { captureWallScene, restoreWallScene, searchWallItems, validWallScene, wallSceneStorageKey } from './poster-wall-workspace.js'
 
 /** @typedef {{key:string,size?:number,lastModified?:number|string}} ImageItem */
 /** @typedef {{key:string,node:HTMLButtonElement,img:HTMLImageElement,cancel:()=>void,active:boolean,stopped:boolean,requestedWidth:number}} ImageTask */
@@ -20,6 +21,8 @@ class PosterWall {
   #onMore
   /** @type {()=>void} */
   #onClose
+  /** @type {()=>string} */
+  #getScope
   /** @type {HTMLElement} */
   #root
   /** @type {HTMLElement} */
@@ -33,6 +36,20 @@ class PosterWall {
   /** @type {HTMLElement} */
   #zoomNode
   #lastCountValue = -1
+  /** @type {HTMLElement} */
+  #searchPanel
+  /** @type {HTMLInputElement} */
+  #searchInput
+  /** @type {HTMLElement} */
+  #searchStatus
+  /** @type {HTMLButtonElement} */
+  #sceneRestoreButton
+  /** @type {HTMLElement} */
+  #noticeNode
+  #noticeTimer = 0
+  /** @type {string[]} */
+  #searchResults = []
+  #searchIndex = -1
   /** @type {ImageItem[]} */
   #items = []
   /** @type {ReturnType<typeof buildWallLayout>} */
@@ -87,20 +104,26 @@ class PosterWall {
 
   /**
    * @param {import('./r2-client.js').R2Client} r2
-   * @param {{onPreview:(item:ImageItem)=>void,onLoadMore:()=>Promise<void>|void,onClose:()=>void}} options
+   * @param {{onPreview:(item:ImageItem)=>void,onLoadMore:()=>Promise<void>|void,onClose:()=>void,getScope?:()=>string}} options
    */
-  constructor(r2, { onPreview, onLoadMore, onClose }) {
+  constructor(r2, { onPreview, onLoadMore, onClose, getScope = () => '' }) {
     this.#r2 = r2
     this.#images = new ImageAssetService(r2)
     this.#onPreview = onPreview
     this.#onMore = onLoadMore
     this.#onClose = onClose
+    this.#getScope = getScope
     this.#root = /** @type {HTMLElement} */ (document.querySelector('#poster-wall'))
     this.#viewport = /** @type {HTMLElement} */ (document.querySelector('#poster-wall-viewport'))
     this.#canvas = /** @type {HTMLElement} */ (document.querySelector('#poster-wall-canvas'))
     this.#focusActions = /** @type {HTMLElement} */ (document.querySelector('#wall-focus-actions'))
     this.#countNode = /** @type {HTMLElement} */ (document.querySelector('#wall-count'))
     this.#zoomNode = /** @type {HTMLElement} */ (document.querySelector('#wall-zoom-value'))
+    this.#searchPanel = /** @type {HTMLElement} */ (document.querySelector('#wall-search-panel'))
+    this.#searchInput = /** @type {HTMLInputElement} */ (document.querySelector('#wall-search-input'))
+    this.#searchStatus = /** @type {HTMLElement} */ (document.querySelector('#wall-search-status'))
+    this.#sceneRestoreButton = /** @type {HTMLButtonElement} */ (document.querySelector('#wall-restore-view'))
+    this.#noticeNode = /** @type {HTMLElement} */ (document.querySelector('#wall-notice'))
     this.#reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (event) => {
       this.#reducedMotion = event.matches
@@ -190,6 +213,11 @@ class PosterWall {
     this.#hasMore = hasMore
     this.#activeKey = null
     this.#focusReturnCamera = null
+    this.#searchInput.value = ''
+    this.#searchResults = []
+    this.#searchIndex = -1
+    this.#setSearchOpen(false)
+    this.#refreshSavedView()
     this.#recalculate()
     this.resetCamera()
     this.#render()
@@ -202,6 +230,7 @@ class PosterWall {
     this.#items = items
     this.#hasMore = hasMore
     if (!this.isOpen) return
+    this.#updateSearchResults()
     const previous = this.#getVisualRects()
     this.#recalculate()
     if (this.#activeKey && !this.#positions.has(this.#activeKey)) {
@@ -235,6 +264,11 @@ class PosterWall {
     this.#focusReturnCamera = null
     this.#pinchDistance = 0
     this.#cancelAllImages()
+    this.#setSearchOpen(false)
+    this.#searchResults = []
+    this.#searchIndex = -1
+    window.clearTimeout(this.#noticeTimer)
+    this.#noticeNode.hidden = true
     this.#nodes.clear()
     this.#canvas.replaceChildren()
     this.#root.classList.remove('has-active')
@@ -253,7 +287,14 @@ class PosterWall {
     document.querySelector('#wall-preview').textContent = t('wallOriginalPreview')
     document.querySelector('#wall-collapse').textContent = t('wallCollapse')
     document.querySelector('#wall-load-more').textContent = t('wallLoadMore')
+    document.querySelector('#wall-search-label').textContent = t('wallSearch')
+    this.#searchInput.placeholder = t('wallSearchPlaceholder')
     for (const [id, key] of [
+      ['wall-search-toggle', 'wallSearch'],
+      ['wall-search-prev', 'wallSearchPrevious'],
+      ['wall-search-next', 'wallSearchNext'],
+      ['wall-save-view', 'wallSaveView'],
+      ['wall-restore-view', 'wallRestoreView'],
       ['wall-close', 'wallExit'],
       ['wall-zoom-in', 'wallZoomIn'],
       ['wall-zoom-out', 'wallZoomOut'],
@@ -263,6 +304,7 @@ class PosterWall {
       button.setAttribute('aria-label', t(/** @type {any} */ (key)))
       button.setAttribute('title', t(/** @type {any} */ (key)))
     }
+    this.#updateSearchResults()
     this.#updateHud()
   }
 
