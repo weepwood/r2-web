@@ -59,6 +59,8 @@ class PosterWall {
   #qualityTimer = 0
   #lastQualityScale = 0
   #camera = { x: 40, y: 80, scale: 0.76 }
+  /** @type {{x:number,y:number,scale:number}|null} */
+  #focusReturnCamera = null
   /** @type {string|null} */
   #activeKey = null
   #hasMore = false
@@ -126,9 +128,16 @@ class PosterWall {
     this.#viewportSize = { width, height }
     this.#cancelCameraMotion()
     this.#cancelWheelMotion()
-    // Keep the midpoint of the current viewport steady on ordinary resizes.
-    this.#camera.x += (width - previousSize.width) / 2
-    this.#camera.y += (height - previousSize.height) / 2
+    // Keep both the active camera and the pre-focus return location anchored
+    // around the viewport midpoint on ordinary resizes.
+    const shiftX = (width - previousSize.width) / 2
+    const shiftY = (height - previousSize.height) / 2
+    this.#camera.x += shiftX
+    this.#camera.y += shiftY
+    if (this.#focusReturnCamera) {
+      this.#focusReturnCamera.x += shiftX
+      this.#focusReturnCamera.y += shiftY
+    }
 
     const nextColumns = width < 760 ? 2 : 3
     if (nextColumns === this.#columnCount) {
@@ -136,6 +145,9 @@ class PosterWall {
       return
     }
 
+    // Template geometry changes at the breakpoint, so the old unexpanded
+    // camera is no longer a valid target for an animated return.
+    this.#focusReturnCamera = null
     const previousRects = this.#getVisualRects()
     const centerX = (width / 2 - this.#camera.x) / this.#camera.scale
     const centerY = (height / 2 - this.#camera.y) / this.#camera.scale
@@ -177,6 +189,7 @@ class PosterWall {
     this.#items = items
     this.#hasMore = hasMore
     this.#activeKey = null
+    this.#focusReturnCamera = null
     this.#recalculate()
     this.resetCamera()
     this.#render()
@@ -191,7 +204,10 @@ class PosterWall {
     if (!this.isOpen) return
     const previous = this.#getVisualRects()
     this.#recalculate()
-    if (this.#activeKey && !this.#positions.has(this.#activeKey)) this.#activeKey = null
+    if (this.#activeKey && !this.#positions.has(this.#activeKey)) {
+      this.#activeKey = null
+      this.#focusReturnCamera = null
+    }
     this.#positions = focusReflow(this.#layout, this.#activeKey)
     this.#render(previous)
   }
@@ -216,6 +232,7 @@ class PosterWall {
     this.#dragged = false
     this.#viewport.classList.remove('is-dragging')
     this.#activeKey = null
+    this.#focusReturnCamera = null
     this.#pinchDistance = 0
     this.#cancelAllImages()
     this.#nodes.clear()
@@ -612,7 +629,9 @@ class PosterWall {
     // FLIP samples only the 7-8 cards in the affected geometric block(s),
     // not every image on the wall.
     const previous = this.#getVisualRects(blocks)
-    this.#activeKey = this.#activeKey === key ? null : key
+    const collapsing = this.#activeKey === key
+    if (!this.#activeKey) this.#focusReturnCamera = {...this.#camera}
+    this.#activeKey = collapsing ? null : key
     // Restore the previously expanded block and update only the new one.
     // The layout map is reused; a large Bucket never needs a full clone here.
     for (const block of blocks) {
@@ -639,6 +658,13 @@ class PosterWall {
             this.#viewport.clientWidth,this.#viewport.clientHeight),
           420)
       }
+    } else if (this.#focusReturnCamera) {
+      // Closing the poster completes the spatial gesture by returning to the
+      // exact viewpoint from which it was opened, instead of stranding the
+      // visitor at an unexpectedly zoomed-in camera location.
+      const target = this.#focusReturnCamera
+      this.#focusReturnCamera = null
+      this.#animateCamera(target, 360)
     }
   }
 
