@@ -714,7 +714,8 @@ class PosterWall {
     // Avoid a synchronous layout read on every camera animation frame.
     const width = 220
     const left = Math.max(14, Math.min(projectedRight - width, viewportWidth - width - 14))
-    const top = Math.max(79, Math.min(projectedBottom + 10, viewportHeight - 76))
+    const bottomInset = viewportWidth < 640 ? 145 : 76
+    const top = Math.max(79, Math.min(projectedBottom + 10, viewportHeight - bottomInset))
     const position = `translate3d(${Math.round(left)}px, ${Math.round(top)}px, 0)`
     if (actions.style.transform !== position) actions.style.transform = position
     return true
