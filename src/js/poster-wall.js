@@ -2,7 +2,10 @@ import { selectThumbnailWidth } from './thumbnail-utils.js'
 import { ImageAssetService } from './image-asset-service.js'
 import { extractFileName } from './utils.js'
 import { t } from './i18n.js'
-import { buildWallLayout, cameraBounds, focusReflow, intersects, preserveTileAnchor, zoomAt } from './poster-wall-layout.js'
+import { buildWallLayout, cameraBounds, focusBlockReflow, focusReflow, intersects, preserveTileAnchor, zoomAt } from './poster-wall-layout.js'
+import { indexWallTiles, queryWallTiles } from './poster-wall-visibility.js'
+import { classifyWallWheel, focusedWallCamera, projectWallCoast, stepWheelDamping } from './poster-wall-motion.js'
+import { captureWallScene, restoreWallScene, searchWallItems, validWallScene, wallSceneStorageKey } from './poster-wall-workspace.js'
 
 /** @typedef {{key:string,size?:number,lastModified?:number|string}} ImageItem */
 /** @typedef {{key:string,node:HTMLButtonElement,img:HTMLImageElement,cancel:()=>void,active:boolean,stopped:boolean,requestedWidth:number}} ImageTask */
@@ -18,20 +21,50 @@ class PosterWall {
   #onMore
   /** @type {()=>void} */
   #onClose
+  /** @type {()=>string} */
+  #getScope
   /** @type {HTMLElement} */
   #root
   /** @type {HTMLElement} */
   #viewport
   /** @type {HTMLElement} */
   #canvas
+  /** @type {HTMLElement} */
+  #focusActions
+  /** @type {HTMLElement} */
+  #countNode
+  /** @type {HTMLElement} */
+  #zoomNode
+  #lastCountValue = -1
+  /** @type {HTMLElement} */
+  #searchPanel
+  /** @type {HTMLInputElement} */
+  #searchInput
+  /** @type {HTMLElement} */
+  #searchStatus
+  /** @type {HTMLButtonElement} */
+  #sceneRestoreButton
+  /** @type {HTMLElement} */
+  #noticeNode
+  #noticeTimer = 0
+  /** @type {string[]} */
+  #searchResults = []
+  #searchIndex = -1
   /** @type {ImageItem[]} */
   #items = []
   /** @type {ReturnType<typeof buildWallLayout>} */
   #layout = []
   /** @type {Map<string,import('./poster-wall-layout.js').WallTile>} */
   #tileByKey = new Map()
+  /** @type {Map<number,import('./poster-wall-layout.js').WallTile[]>} */
+  #blockTiles = new Map()
   /** @type {ReturnType<typeof focusReflow>} */
   #positions = new Map()
+  /** @type {ReturnType<typeof indexWallTiles>} */
+  #blocks = new Map()
+  /** @type {{x:number,y:number,w:number,h:number}|null} */
+  #committedBounds = null
+  #entranceWave = false
   /** @type {Map<string,HTMLButtonElement>} */
   #nodes = new Map()
   /** @type {Map<string,ImageTask>} */
@@ -43,15 +76,22 @@ class PosterWall {
   #qualityTimer = 0
   #lastQualityScale = 0
   #camera = { x: 40, y: 80, scale: 0.76 }
+  /** @type {{x:number,y:number,scale:number}|null} */
+  #focusReturnCamera = null
   /** @type {string|null} */
   #activeKey = null
   #hasMore = false
   #renderFrame = 0
   #cameraFrame = 0
+  #wheelFrame = 0
+  #wheelTime = 0
+  #wheelPending = { x: 0, y: 0 }
+  #wheelLastEvent = 0
+  #wheelPrecise = false
   #reducedMotion = false
   #pinchDistance = 0
   #lastPinchCenter = { x: 0, y: 0 }
-  /** @type {Map<number,{x:number,y:number,originX:number,originY:number}>} */
+  /** @type {Map<number,{x:number,y:number,originX:number,originY:number,lastTime:number,vx:number,vy:number}>} */
   #pointers = new Map()
   /** @type {string|null} */
   #pointerTile = null
@@ -64,22 +104,32 @@ class PosterWall {
 
   /**
    * @param {import('./r2-client.js').R2Client} r2
-   * @param {{onPreview:(item:ImageItem)=>void,onLoadMore:()=>Promise<void>|void,onClose:()=>void}} options
+   * @param {{onPreview:(item:ImageItem)=>void,onLoadMore:()=>Promise<void>|void,onClose:()=>void,getScope?:()=>string}} options
    */
-  constructor(r2, { onPreview, onLoadMore, onClose }) {
+  constructor(r2, { onPreview, onLoadMore, onClose, getScope = () => '' }) {
     this.#r2 = r2
     this.#images = new ImageAssetService(r2)
     this.#onPreview = onPreview
     this.#onMore = onLoadMore
     this.#onClose = onClose
+    this.#getScope = getScope
     this.#root = /** @type {HTMLElement} */ (document.querySelector('#poster-wall'))
     this.#viewport = /** @type {HTMLElement} */ (document.querySelector('#poster-wall-viewport'))
     this.#canvas = /** @type {HTMLElement} */ (document.querySelector('#poster-wall-canvas'))
+    this.#focusActions = /** @type {HTMLElement} */ (document.querySelector('#wall-focus-actions'))
+    this.#countNode = /** @type {HTMLElement} */ (document.querySelector('#wall-count'))
+    this.#zoomNode = /** @type {HTMLElement} */ (document.querySelector('#wall-zoom-value'))
+    this.#searchPanel = /** @type {HTMLElement} */ (document.querySelector('#wall-search-panel'))
+    this.#searchInput = /** @type {HTMLInputElement} */ (document.querySelector('#wall-search-input'))
+    this.#searchStatus = /** @type {HTMLElement} */ (document.querySelector('#wall-search-status'))
+    this.#sceneRestoreButton = /** @type {HTMLButtonElement} */ (document.querySelector('#wall-restore-view'))
+    this.#noticeNode = /** @type {HTMLElement} */ (document.querySelector('#wall-notice'))
     this.#reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (event) => {
       this.#reducedMotion = event.matches
       if (event.matches) {
         this.#cancelCameraMotion()
+        this.#cancelWheelMotion()
         for (const tile of this.#nodes.values()) tile.getAnimations().forEach((animation) => animation.cancel())
       }
     })
@@ -100,9 +150,17 @@ class PosterWall {
     if (previousSize.width === width && previousSize.height === height) return
     this.#viewportSize = { width, height }
     this.#cancelCameraMotion()
-    // Keep the midpoint of the current viewport steady on ordinary resizes.
-    this.#camera.x += (width - previousSize.width) / 2
-    this.#camera.y += (height - previousSize.height) / 2
+    this.#cancelWheelMotion()
+    // Keep both the active camera and the pre-focus return location anchored
+    // around the viewport midpoint on ordinary resizes.
+    const shiftX = (width - previousSize.width) / 2
+    const shiftY = (height - previousSize.height) / 2
+    this.#camera.x += shiftX
+    this.#camera.y += shiftY
+    if (this.#focusReturnCamera) {
+      this.#focusReturnCamera.x += shiftX
+      this.#focusReturnCamera.y += shiftY
+    }
 
     const nextColumns = width < 760 ? 2 : 3
     if (nextColumns === this.#columnCount) {
@@ -110,6 +168,9 @@ class PosterWall {
       return
     }
 
+    // Template geometry changes at the breakpoint, so the old unexpanded
+    // camera is no longer a valid target for an animated return.
+    this.#focusReturnCamera = null
     const previousRects = this.#getVisualRects()
     const centerX = (width / 2 - this.#camera.x) / this.#camera.scale
     const centerY = (height / 2 - this.#camera.y) / this.#camera.scale
@@ -146,12 +207,21 @@ class PosterWall {
       sibling.inert = true
     }
     this.#columnCount = this.#viewport.clientWidth < 760 ? 2 : 3
+    this.#committedBounds = null
+    this.#entranceWave = !this.#reducedMotion
     this.#items = items
     this.#hasMore = hasMore
     this.#activeKey = null
+    this.#focusReturnCamera = null
+    this.#searchInput.value = ''
+    this.#searchResults = []
+    this.#searchIndex = -1
+    this.#setSearchOpen(false)
+    this.#refreshSavedView()
     this.#recalculate()
     this.resetCamera()
     this.#render()
+    this.#entranceWave = false
     this.#viewport.focus({ preventScroll: true })
   }
 
@@ -160,9 +230,13 @@ class PosterWall {
     this.#items = items
     this.#hasMore = hasMore
     if (!this.isOpen) return
+    this.#updateSearchResults()
     const previous = this.#getVisualRects()
     this.#recalculate()
-    if (this.#activeKey && !this.#positions.has(this.#activeKey)) this.#activeKey = null
+    if (this.#activeKey && !this.#positions.has(this.#activeKey)) {
+      this.#activeKey = null
+      this.#focusReturnCamera = null
+    }
     this.#positions = focusReflow(this.#layout, this.#activeKey)
     this.#render(previous)
   }
@@ -174,18 +248,27 @@ class PosterWall {
     this.#backgroundInert.clear()
     if (this.#renderFrame) cancelAnimationFrame(this.#renderFrame)
     this.#renderFrame = 0
+    this.#committedBounds = null
+    this.#entranceWave = false
     window.clearTimeout(this.#qualityTimer)
     this.#qualityTimer = 0
     this.#lastQualityScale = 0
     this.#cancelCameraMotion()
+    this.#cancelWheelMotion()
     this.#pointers.clear()
     this.#gestureUsedPinch = false
     this.#pointerTile = null
     this.#dragged = false
     this.#viewport.classList.remove('is-dragging')
     this.#activeKey = null
+    this.#focusReturnCamera = null
     this.#pinchDistance = 0
     this.#cancelAllImages()
+    this.#setSearchOpen(false)
+    this.#searchResults = []
+    this.#searchIndex = -1
+    window.clearTimeout(this.#noticeTimer)
+    this.#noticeNode.hidden = true
     this.#nodes.clear()
     this.#canvas.replaceChildren()
     this.#root.classList.remove('has-active')
@@ -193,6 +276,7 @@ class PosterWall {
   }
 
   refreshLabels() {
+    this.#lastCountValue = -1
     this.#root.setAttribute('aria-label', t('viewWall'))
     this.#viewport.setAttribute('aria-label', t('wallHelp'))
     document.querySelector('#wall-eyebrow').textContent = t('wallEyebrow')
@@ -203,7 +287,14 @@ class PosterWall {
     document.querySelector('#wall-preview').textContent = t('wallOriginalPreview')
     document.querySelector('#wall-collapse').textContent = t('wallCollapse')
     document.querySelector('#wall-load-more').textContent = t('wallLoadMore')
+    document.querySelector('#wall-search-label').textContent = t('wallSearch')
+    this.#searchInput.placeholder = t('wallSearchPlaceholder')
     for (const [id, key] of [
+      ['wall-search-toggle', 'wallSearch'],
+      ['wall-search-prev', 'wallSearchPrevious'],
+      ['wall-search-next', 'wallSearchNext'],
+      ['wall-save-view', 'wallSaveView'],
+      ['wall-restore-view', 'wallRestoreView'],
       ['wall-close', 'wallExit'],
       ['wall-zoom-in', 'wallZoomIn'],
       ['wall-zoom-out', 'wallZoomOut'],
@@ -213,17 +304,148 @@ class PosterWall {
       button.setAttribute('aria-label', t(/** @type {any} */ (key)))
       button.setAttribute('title', t(/** @type {any} */ (key)))
     }
+    this.#updateSearchResults()
     this.#updateHud()
+  }
+
+  /**
+   * A scene bookmark stores only camera geometry. Never persist R2 URLs,
+   * access credentials, object bytes, or a full list of image keys.
+   */
+  #sceneKey() {
+    const scope = this.#getScope()
+    return scope ? wallSceneStorageKey(scope) : null
+  }
+
+  #readSavedView() {
+    const key = this.#sceneKey()
+    if (!key) return null
+    try {
+      const stored = localStorage.getItem(key)
+      return stored ? validWallScene(JSON.parse(stored)) : null
+    } catch { return null }
+  }
+
+  #refreshSavedView() {
+    this.#sceneRestoreButton.disabled = !this.#readSavedView()
+  }
+
+  /** @param {'wallViewSaved'|'wallViewRestored'|'wallViewSaveFailed'|'wallViewUnavailable'} key */
+  #notify(key) {
+    window.clearTimeout(this.#noticeTimer)
+    this.#noticeNode.textContent = t(key)
+    this.#noticeNode.hidden = false
+    this.#noticeTimer = window.setTimeout(() => {
+      this.#noticeNode.hidden = true
+      this.#noticeTimer = 0
+    }, 2600)
+  }
+
+  #saveView() {
+    if (!this.isOpen) return
+    const key = this.#sceneKey()
+    const view = captureWallScene(this.#camera,
+      this.#viewport.clientWidth,this.#viewport.clientHeight)
+    if (!key || !validWallScene(view)) {
+      this.#notify('wallViewSaveFailed')
+      return
+    }
+    try {
+      localStorage.setItem(key, JSON.stringify(view))
+      this.#refreshSavedView()
+      this.#notify('wallViewSaved')
+    } catch {
+      this.#notify('wallViewSaveFailed')
+    }
+  }
+
+  #restoreView() {
+    const saved = this.#readSavedView()
+    const target = restoreWallScene(saved,
+      this.#viewport.clientWidth,this.#viewport.clientHeight)
+    if (!this.isOpen || !target) {
+      this.#refreshSavedView()
+      this.#notify('wallViewUnavailable')
+      return
+    }
+    if (this.#activeKey) this.#toggle(this.#activeKey)
+    this.#focusReturnCamera = null
+    this.#animateCamera(target, 430)
+    this.#notify('wallViewRestored')
+  }
+
+  /** @param {boolean} open */
+  #setSearchOpen(open) {
+    this.#searchPanel.hidden = !open
+    document.querySelector('#wall-search-toggle').setAttribute('aria-expanded', String(open))
+    if (open) {
+      this.#searchInput.focus({preventScroll:true})
+      this.#searchInput.select()
+    }
+  }
+
+  #updateSearchResults() {
+    this.#searchResults = searchWallItems(this.#items, this.#searchInput.value)
+    this.#searchIndex = this.#searchResults.indexOf(this.#activeKey ?? '')
+    const prevButton = /** @type {HTMLButtonElement} */ (document.querySelector('#wall-search-prev'))
+    const nextButton = /** @type {HTMLButtonElement} */ (document.querySelector('#wall-search-next'))
+    prevButton.disabled = !this.#searchResults.length
+    nextButton.disabled = !this.#searchResults.length
+    this.#renderSearchStatus()
+  }
+
+  #renderSearchStatus() {
+    if (!this.#searchInput.value.trim()) {
+      this.#searchStatus.textContent = t('wallSearchHint')
+    } else if (!this.#searchResults.length) {
+      this.#searchStatus.textContent = t('wallSearchNone')
+    } else {
+      this.#searchStatus.textContent = t('wallSearchResults', {
+        index:this.#searchIndex+1,total:this.#searchResults.length,
+      })
+    }
+  }
+
+  /** @param {number} direction */
+  #stepSearch(direction) {
+    const count = this.#searchResults.length
+    if (!count) return
+    this.#searchIndex = this.#searchIndex < 0
+      ? (direction > 0 ? 0 : count-1)
+      : (this.#searchIndex + direction + count) % count
+    const key = this.#searchResults[this.#searchIndex]
+    if (key !== this.#activeKey) this.#toggle(key)
+    this.#renderSearchStatus()
+  }
+
+  /** @param {number} direction */
+  #stepImage(direction) {
+    if (!this.#items.length) return
+    const index = this.#items.findIndex(item => item.key === this.#activeKey)
+    const next = index < 0 ? (direction > 0 ? 0 : this.#items.length-1)
+      : (index+direction+this.#items.length)%this.#items.length
+    const key = this.#items[next].key
+    if (key !== this.#activeKey) this.#toggle(key)
+    this.#searchIndex = this.#searchResults.indexOf(key)
+    this.#renderSearchStatus()
   }
 
   #recalculate() {
     this.#layout = buildWallLayout(this.#items, { columns: this.#columnCount })
     this.#tileByKey = new Map(this.#layout.map((tile) => [tile.key, tile]))
+    this.#blockTiles.clear()
+    for (const tile of this.#layout) {
+      const list = this.#blockTiles.get(tile.blockIndex) || []
+      list.push(tile)
+      this.#blockTiles.set(tile.blockIndex, list)
+    }
+    this.#blocks = indexWallTiles(this.#layout)
     this.#positions = focusReflow(this.#layout, this.#activeKey)
   }
 
   /** @param {boolean} [animated] */
   resetCamera(animated = false) {
+    this.#cancelWheelMotion()
     const width = this.#viewport.clientWidth || window.innerWidth
     const height = this.#viewport.clientHeight || window.innerHeight
     const defaultScale = width < 640 ? 0.54 : width < 1100 ? 0.66 : 0.76
@@ -255,6 +477,7 @@ class PosterWall {
 
   /** @param {number} factor @param {number} [x] @param {number} [y] @param {boolean} [animated] */
   zoom(factor, x = this.#viewport.clientWidth / 2, y = this.#viewport.clientHeight / 2, animated = false) {
+    this.#cancelWheelMotion()
     const target = zoomAt(this.#camera, x, y, this.#camera.scale * factor)
     if (animated) this.#animateCamera(target, 235)
     else {
@@ -269,12 +492,44 @@ class PosterWall {
     this.#cameraFrame = 0
   }
 
+  #cancelWheelMotion() {
+    if (this.#wheelFrame) cancelAnimationFrame(this.#wheelFrame)
+    this.#wheelFrame = 0
+    this.#wheelTime = 0
+    this.#wheelPending = {x:0,y:0}
+  }
+
+  /** @param {number} dx @param {number} dy */
+  #moveWheel(dx,dy) {
+    this.#cancelCameraMotion()
+    this.#wheelPending.x -= dx
+    this.#wheelPending.y -= dy
+    if (this.#wheelFrame) return
+    /** @param {number} now */
+    const tick = (now) => {
+      this.#wheelFrame = 0
+      if (!this.isOpen) { this.#cancelWheelMotion(); return }
+      const dt = this.#wheelTime ? now-this.#wheelTime : 16
+      this.#wheelTime = now
+      const motion = stepWheelDamping(this.#wheelPending,dt)
+      this.#wheelPending = motion.pending
+      this.#camera.x += motion.step.x
+      this.#camera.y += motion.step.y
+      this.#scheduleRender()
+      if (this.#wheelPending.x || this.#wheelPending.y) {
+        this.#wheelFrame = requestAnimationFrame(tick)
+      } else this.#wheelTime = 0
+    }
+    this.#wheelFrame = requestAnimationFrame(tick)
+  }
+
   /**
    * Short interruptible UI-camera motion. Real pointer movements cancel it.
    * @param {{x:number,y:number,scale:number}} target
    * @param {number} duration
    */
   #animateCamera(target, duration) {
+    this.#cancelWheelMotion()
     this.#cancelCameraMotion()
     if (this.#reducedMotion) {
       this.#camera = target
@@ -298,43 +553,91 @@ class PosterWall {
     this.#cameraFrame = requestAnimationFrame(tick)
   }
 
+  /**
+   * Camera frames only touch the GPU transform and a tiny HUD. They do not
+   * scan, sort or allocate the tile DOM on every mouse move / touch frame.
+   * The cached cull box reserves 380px around the visible viewport; refresh
+   * it only when the visible rectangle approaches the edge of that reserve.
+   */
   #scheduleRender() {
     if (!this.isOpen || this.#renderFrame) return
     this.#renderFrame = requestAnimationFrame(() => {
       this.#renderFrame = 0
-      this.#render()
+      this.#paintCamera()
+      const bounds = this.#committedBounds
+      const visible = cameraBounds(this.#camera,
+        this.#viewport.clientWidth, this.#viewport.clientHeight, 0)
+      const margin = 110 / this.#camera.scale
+      if (!bounds ||
+        visible.x < bounds.x + margin ||
+        visible.y < bounds.y + margin ||
+        visible.x + visible.w > bounds.x + bounds.w - margin ||
+        visible.y + visible.h > bounds.y + bounds.h - margin) {
+        this.#render()
+      }
     })
   }
 
-  #getVisualRects() {
-    return new Map([...this.#nodes].map(([key, node]) => [key, node.getBoundingClientRect()]))
+  #paintCamera() {
+    const { x, y, scale } = this.#camera
+    this.#canvas.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${scale})`
+    const zoomLevel = scale < 0.58 ? 'overview' : scale > 1.45 ? 'detail' : 'normal'
+    if (this.#root.dataset.zoomLevel !== zoomLevel) this.#root.dataset.zoomLevel = zoomLevel
+    if (Math.abs(this.#lastQualityScale - scale) >= 0.025) {
+      this.#lastQualityScale = scale
+      this.#scheduleQualityCheck()
+    }
+    this.#updateHud()
+    if (this.#activeKey) {
+      const visible = this.#positionFocusActions(this.#focusActions)
+      if (this.#focusActions.hidden === visible) this.#focusActions.hidden = !visible
+    }
+  }
+
+  /** @param {Set<number>|null} [blocks] */
+  #getVisualRects(blocks = null) {
+    return new Map([...this.#nodes]
+      .filter(([key]) => !blocks || blocks.has(this.#tileByKey.get(key)?.blockIndex ?? -1))
+      .map(([key, node]) => [key, node.getBoundingClientRect()]))
   }
 
   /** @param {Map<string,DOMRect>} [previous] */
   #render(previous) {
     if (!this.isOpen) return
-    const { x, y, scale } = this.#camera
-    this.#canvas.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${scale})`
-    // At overview zoom, typography withdraws so the photographs read as one
-    // continuous mosaic. Hover, keyboard focus and selection still reveal it.
-    const zoomLevel = scale < 0.58 ? 'overview' : scale > 1.45 ? 'detail' : 'normal'
-    if (this.#root.dataset.zoomLevel !== zoomLevel) this.#root.dataset.zoomLevel = zoomLevel
-    const bounds = cameraBounds(this.#camera, this.#viewport.clientWidth, this.#viewport.clientHeight)
-    const visible = new Set()
-    for (const tile of this.#layout) {
+    this.#root.dataset.wallRenderPasses = String(
+      Number(this.#root.dataset.wallRenderPasses || 0) + 1)
+    this.#paintCamera()
+    const { scale } = this.#camera
+    const bounds = cameraBounds(this.#camera, this.#viewport.clientWidth,
+      this.#viewport.clientHeight, 380)
+    this.#committedBounds = bounds
+    const candidates = queryWallTiles(this.#blocks, this.#positions, bounds)
+    const visible = new Set(candidates.map((tile) => tile.key))
+    for (const tile of candidates) {
       const rect = this.#positions.get(tile.key)
-      if (!rect || !intersects(rect, bounds)) continue
-      visible.add(tile.key)
+      if (!rect) continue
       let node = this.#nodes.get(tile.key)
       if (!node) {
         node = this.#createTile(tile)
         this.#nodes.set(tile.key, node)
         this.#canvas.append(node)
         this.#enqueueImage(tile, node)
+        // Limit first-paint animation work on low-end GPUs. Newly culled-in
+        // cards mount at their destination without replaying the opening wave.
+        if (this.#entranceWave && this.#nodes.size <= 48) {
+          const screenX = tile.x * scale + this.#camera.x
+          const screenY = tile.y * scale + this.#camera.y
+          const delay = Math.min(290, Math.max(0, (screenX + screenY) * 0.11))
+          node.style.setProperty('--wall-entrance-delay', delay + 'ms')
+          node.classList.add('is-entering')
+          node.addEventListener('animationend', () => node.classList.remove('is-entering'), { once:true })
+        }
       }
-      // An interrupted spring starts at the tile's current visual location.
-      if (previous?.has(tile.key)) node.getAnimations().forEach((animation) => animation.cancel())
       const layoutId = `${rect.x},${rect.y},${rect.w},${rect.h}`
+      // Only the actually reconfigured block needs to interrupt FLIP.
+      if (node.dataset.layoutRect !== layoutId && previous?.has(tile.key)) {
+        node.getAnimations().forEach((animation) => animation.cancel())
+      }
       if (node.dataset.layoutRect !== layoutId) {
         node.dataset.layoutRect = layoutId
         node.style.left = `${rect.x}px`
@@ -377,19 +680,15 @@ class PosterWall {
     this.#imageQueue = this.#imageQueue.filter((task) => !task.stopped)
     this.#imageQueue.sort((a, b) => this.#imagePriority(a.key) - this.#imagePriority(b.key))
     this.#pumpImages()
-    if (Math.abs(this.#lastQualityScale - scale) >= 0.025) {
-      this.#lastQualityScale = scale
-      this.#scheduleQualityCheck()
-    }
-
     this.#root.classList.toggle('has-active', Boolean(this.#activeKey))
-    const focusActions = /** @type {HTMLElement} */ (document.querySelector('#wall-focus-actions'))
+    const focusActions = this.#focusActions
     const emptyState = /** @type {HTMLElement} */ (document.querySelector('#wall-empty'))
     const moreControl = /** @type {HTMLElement} */ (document.querySelector('#wall-more'))
     const actionsVisible = this.#activeKey ? this.#positionFocusActions(focusActions) : false
     focusActions.hidden = !actionsVisible
     emptyState.hidden = this.#layout.length > 0
     moreControl.hidden = !this.#hasMore
+    this.#root.dataset.wallMountedTiles = String(this.#nodes.size)
     this.#updateHud()
   }
 
@@ -412,11 +711,13 @@ class PosterWall {
     if (projectedRight < 0 || projectedBottom < 0 || projectedLeft > viewportWidth || projectedTop > viewportHeight) {
       return false
     }
-    const width = actions.offsetWidth || 220
+    // Avoid a synchronous layout read on every camera animation frame.
+    const width = 220
     const left = Math.max(14, Math.min(projectedRight - width, viewportWidth - width - 14))
-    const top = Math.max(79, Math.min(projectedBottom + 10, viewportHeight - 76))
-    actions.style.left = `${left}px`
-    actions.style.top = `${top}px`
+    const bottomInset = viewportWidth < 640 ? 145 : 76
+    const top = Math.max(79, Math.min(projectedBottom + 10, viewportHeight - bottomInset))
+    const position = `translate3d(${Math.round(left)}px, ${Math.round(top)}px, 0)`
+    if (actions.style.transform !== position) actions.style.transform = position
     return true
   }
 
@@ -485,17 +786,62 @@ class PosterWall {
   /** @param {string} key */
   #toggle(key) {
     if (!this.isOpen) return
-    const previous = this.#getVisualRects()
-    this.#activeKey = this.#activeKey === key ? null : key
-    this.#positions = focusReflow(this.#layout, this.#activeKey)
+    this.#cancelCameraMotion()
+    this.#cancelWheelMotion()
+    const oldBlock = this.#activeKey ? this.#tileByKey.get(this.#activeKey)?.blockIndex : null
+    const newBlock = this.#tileByKey.get(key)?.blockIndex
+    const blocks = new Set([oldBlock,newBlock].filter((value) => value !== null && value !== undefined))
+    // FLIP samples only the 7-8 cards in the affected geometric block(s),
+    // not every image on the wall.
+    const previous = this.#getVisualRects(blocks)
+    const collapsing = this.#activeKey === key
+    if (!this.#activeKey) this.#focusReturnCamera = {...this.#camera}
+    this.#activeKey = collapsing ? null : key
+    // Restore the previously expanded block and update only the new one.
+    // The layout map is reused; a large Bucket never needs a full clone here.
+    for (const block of blocks) {
+      const tiles = this.#blockTiles.get(block) || []
+      for (const tile of tiles) {
+        this.#positions.set(tile.key, { x:tile.x, y:tile.y, w:tile.w, h:tile.h })
+      }
+    }
+    if (this.#activeKey && newBlock !== undefined) {
+      const tiles = this.#blockTiles.get(newBlock) || []
+      for (const [itemKey, rect] of focusBlockReflow(tiles, this.#activeKey)) {
+        this.#positions.set(itemKey, rect)
+      }
+    }
     this.#render(previous)
+
+    // Folia-like focus: the expanded picture settles towards the center
+    // while surrounding posters re-gear within their own block.
+    if (this.#activeKey) {
+      const rect = this.#positions.get(this.#activeKey)
+      if (rect) {
+        this.#animateCamera(
+          focusedWallCamera(this.#camera,rect,
+            this.#viewport.clientWidth,this.#viewport.clientHeight),
+          420)
+      }
+    } else if (this.#focusReturnCamera) {
+      // Closing the poster completes the spatial gesture by returning to the
+      // exact viewpoint from which it was opened, instead of stranding the
+      // visitor at an unexpectedly zoomed-in camera location.
+      const target = this.#focusReturnCamera
+      this.#focusReturnCamera = null
+      this.#animateCamera(target, 360)
+    }
   }
 
   #updateHud() {
-    const count = document.querySelector('#wall-count')
-    const zoom = document.querySelector('#wall-zoom-value')
-    if (count) count.textContent = t('wallCount', { count: this.#items.length })
-    if (zoom) zoom.textContent = Math.round(this.#camera.scale * 100) + '%'
+    // Count translation is recomputed only when the file count or locale
+    // changes; camera frames only check the small numeric zoom value.
+    if (this.#lastCountValue !== this.#items.length) {
+      this.#lastCountValue = this.#items.length
+      this.#countNode.textContent = t('wallCount', { count: this.#items.length })
+    }
+    const zoomLabel = Math.round(this.#camera.scale * 100) + '%'
+    if (this.#zoomNode.textContent !== zoomLabel) this.#zoomNode.textContent = zoomLabel
   }
 
   /** @param {string} key */
@@ -671,7 +1017,16 @@ class PosterWall {
         if (!upgrade) img.removeAttribute('src')
         settle(false)
       }
-      img.onload = () => settle(true)
+      img.onload = () => {
+        if (!upgrade || typeof img.decode !== 'function') {
+          settle(true)
+          return
+        }
+        // onload only confirms bytes arrived; the image may still need a
+        // costly decode. Keep the old thumbnail painted until the new bitmap
+        // is ready, so a large variant never flashes or stalls focus motion.
+        void img.decode().then(() => settle(true), () => settle(false))
+      }
       img.onerror = () => settle(false)
       img.src = url
     })
@@ -702,13 +1057,29 @@ class PosterWall {
       const rect = this.#viewport.getBoundingClientRect()
       const x = event.clientX - rect.left
       const y = event.clientY - rect.top
-      if (event.shiftKey && !event.ctrlKey) {
-        this.#camera.x -= event.deltaY
-        this.#camera.y -= event.deltaX
+      // Wheel notches accumulate into one damping tail. Precise trackpads
+      // go straight to the camera because the OS already supplies inertia.
+      if (event.ctrlKey || event.altKey) {
+        this.zoom(Math.exp(-event.deltaY * 0.0022), x, y)
+        return
+      }
+      const step = event.deltaMode === 1 ? 16
+        : event.deltaMode === 2 ? this.#viewport.clientHeight : 1
+      const dx = (event.shiftKey ? event.deltaY : event.deltaX) * step
+      const dy = (event.shiftKey ? 0 : event.deltaY) * step
+      const classification = classifyWallWheel(
+        this.#wheelLastEvent,this.#wheelPrecise,event)
+      this.#wheelLastEvent = classification.lastTimestamp
+      this.#wheelPrecise = classification.preciseGesture
+      if (classification.kind === 'precise' || this.#reducedMotion) {
+        const carry = this.#wheelPending
+        this.#cancelWheelMotion()
+        this.#cancelCameraMotion()
+        this.#camera.x += carry.x - dx
+        this.#camera.y += carry.y - dy
         this.#scheduleRender()
       } else {
-        const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.0022 : 0.00125))
-        this.zoom(factor, x, y)
+        this.#moveWheel(dx,dy)
       }
     }, { passive: false })
     // Controls live outside the viewport, so keyboard shortcuts must be scoped
@@ -716,6 +1087,24 @@ class PosterWall {
     this.#root.addEventListener('keydown', (event) => this.#keyDown(event))
     const onClick = (id, cb) => document.querySelector('#' + id).addEventListener('click', cb)
     onClick('wall-close', () => this.close())
+    onClick('wall-search-toggle', () => this.#setSearchOpen(this.#searchPanel.hidden))
+    onClick('wall-search-prev', () => this.#stepSearch(-1))
+    onClick('wall-search-next', () => this.#stepSearch(1))
+    onClick('wall-save-view', () => this.#saveView())
+    onClick('wall-restore-view', () => this.#restoreView())
+    this.#searchInput.addEventListener('input', () => this.#updateSearchResults())
+    this.#searchInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        event.stopPropagation()
+        this.#stepSearch(event.shiftKey ? -1 : 1)
+      } else if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        this.#setSearchOpen(false)
+        this.#viewport.focus({preventScroll:true})
+      }
+    })
     onClick('wall-zoom-in', () => this.zoom(1.23, undefined, undefined, true))
     onClick('wall-zoom-out', () => this.zoom(1 / 1.23, undefined, undefined, true))
     onClick('wall-reset', () => this.resetCamera(true))
@@ -743,10 +1132,12 @@ class PosterWall {
   #pointerDown(event) {
     if (event.pointerType === 'mouse' && event.button !== 0) return
     this.#cancelCameraMotion()
+    this.#cancelWheelMotion()
     this.#viewport.setPointerCapture(event.pointerId)
     this.#pointers.set(event.pointerId, {
       x: event.clientX, y: event.clientY,
       originX: event.clientX, originY: event.clientY,
+      lastTime: event.timeStamp, vx: 0, vy: 0,
     })
     // A second finger is a new gesture; do not allow either contact to
     // synthesize a tile click when it leaves the screen.
@@ -782,6 +1173,12 @@ class PosterWall {
     if (!pointer) return
     const dx = event.clientX - pointer.x
     const dy = event.clientY - pointer.y
+    const elapsed = event.timeStamp - pointer.lastTime
+    if (elapsed > 0 && elapsed < 130) {
+      pointer.vx = pointer.vx * .25 + dx / elapsed * 1000 * .75
+      pointer.vy = pointer.vy * .25 + dy / elapsed * 1000 * .75
+    } else { pointer.vx = 0; pointer.vy = 0 }
+    pointer.lastTime = event.timeStamp
     pointer.x = event.clientX
     pointer.y = event.clientY
     const totalX = pointer.x - pointer.originX
@@ -825,6 +1222,10 @@ class PosterWall {
     if (!pointer) return
     const pick = !this.#dragged && !this.#gestureUsedPinch &&
       this.#pointers.size === 1 ? this.#pointerTile : null
+    const coast = this.#dragged && !this.#gestureUsedPinch && !this.#reducedMotion &&
+      this.#pointers.size === 1 && event.type === 'pointerup'
+      ? projectWallCoast(pointer.vx, pointer.vy, event.timeStamp - pointer.lastTime)
+      : null
     this.#pointers.delete(event.pointerId)
     if (this.#pointers.size < 2) {
       this.#pinchDistance = 0
@@ -842,17 +1243,53 @@ class PosterWall {
       this.#gestureUsedPinch = false
     }
     if (pick && event.type === 'pointerup') this.#toggle(pick)
+    else if (coast && this.isOpen) {
+      this.#animateCamera({
+        x: this.#camera.x + coast.x,
+        y: this.#camera.y + coast.y,
+        scale: this.#camera.scale,
+      }, 330)
+    }
   }
 
   /** @param {KeyboardEvent} event */
   #keyDown(event) {
+    if (event.defaultPrevented) return
+    const editing = event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLTextAreaElement ||
+      (event.target instanceof HTMLElement && event.target.isContentEditable)
+    // Native browser Find cannot locate virtualized image titles, so Ctrl/Cmd+F
+    // searches only the images loaded into the currently open wall.
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+      event.preventDefault()
+      this.#setSearchOpen(true)
+      return
+    }
+    if (editing) return
+    if (!event.altKey && !event.ctrlKey && !event.metaKey && event.key === '/') {
+      event.preventDefault()
+      this.#setSearchOpen(true)
+      return
+    }
     if (event.altKey || event.ctrlKey || event.metaKey) return
+    if (event.key === 'Escape' && !this.#searchPanel.hidden) {
+      event.preventDefault()
+      this.#setSearchOpen(false)
+      this.#viewport.focus({preventScroll:true})
+      return
+    }
+    if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Escape','+','=','-','0','Home','PageUp','PageDown'].includes(event.key)) {
+      this.#cancelCameraMotion()
+      this.#cancelWheelMotion()
+    }
     const step = event.shiftKey ? 170 : 86
     let used = true
     if (event.key === 'Escape') {
       if (this.#activeKey) this.#toggle(this.#activeKey)
       else this.close()
-    } else if (event.key === 'ArrowLeft') this.#camera.x += step
+    } else if (event.key === 'PageDown') this.#stepImage(1)
+    else if (event.key === 'PageUp') this.#stepImage(-1)
+    else if (event.key === 'ArrowLeft') this.#camera.x += step
     else if (event.key === 'ArrowRight') this.#camera.x -= step
     else if (event.key === 'ArrowUp') this.#camera.y += step
     else if (event.key === 'ArrowDown') this.#camera.y -= step

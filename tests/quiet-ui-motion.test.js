@@ -31,7 +31,7 @@ test('camera, spring and focus actions are brief, local and interruptible', () =
   assert.match(wall, /node\.dataset\.layoutRect !== layoutId/)
   assert.match(wall, /duration: 480, easing: 'linear'/)
   assert.match(wall, /#positionFocusActions\(actions\)/)
-  assert.match(wall, /return false[\s\S]*?actions\.style\.left/)
+  assert.match(wall, /return false[\s\S]*?actions\.style\.transform/)
 })
 
 test('full-window presentation isolates keyboard focus, while native dialog remains usable', () => {
@@ -51,4 +51,21 @@ test('workbench gallery is image-first and inspector no longer uses a dominant i
   assert.match(workspaceCss, /\.file-browser\[data-view='gallery'\] \.file-card:hover \{[\s\S]*?transform: none/)
   assert.match(workspaceCss, /\.details-art \{\s*height: 115px/)
   assert.match(workspaceCss, /@media \(prefers-reduced-motion: reduce\)/)
+})
+
+
+test('thumbnail upgrades decode before the existing bitmap is replaced', () => {
+  assert.match(wall, /void img\.decode\(\)\.then\(\(\) => settle\(true\), \(\) => settle\(false\)\)/)
+  assert.match(wall, /if \(upgrade\) \{[\s\S]*?task\.img\.remove\(\)/)
+  assert.match(wall, /task\.cancel = \(\) => \{[\s\S]*?settle\(false\)/)
+})
+
+test('focus actions follow the camera with compositor transforms and restore the previous view', () => {
+  assert.match(wall, /this\.#focusReturnCamera = \{\.\.\.this\.#camera\}/)
+  assert.match(wall, /this\.#animateCamera\(target, 360\)/)
+  assert.match(wall, /if \(actions\.style\.transform !== position\) actions\.style\.transform = position/)
+  assert.doesNotMatch(wall, /actions\.style\.left =/)
+  assert.doesNotMatch(wall, /actions\.style\.top =/)
+  assert.match(wallCss, /@keyframes wall-actions-reveal \{[\s\S]*?translate: 0 11px/)
+  assert.match(wallCss, /\.poster-wall-focus-actions \{[\s\S]*?transform: translate3d\(0,0,0\)/)
 })

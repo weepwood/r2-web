@@ -63,6 +63,14 @@ class App {
       onCopy: (key) => void this.#ops?.copyAs(key, 'path'),
     })
     this.#wall = new PosterWall(this.#r2, {
+      // Namespace local-only camera bookmarks by account, Bucket and prefix.
+      // The bookmark contains geometry, never credentials or object URLs.
+      getScope: () => {
+        const config = this.#config.get()
+        if (!config.bucket) return ''
+        return JSON.stringify([config.accountId || '', config.bucket,
+          this.#explorer?.currentPrefix || ''])
+      },
       onPreview: (item) => this.#openPreview({
         key: item.key, size: item.size ?? 0, lastModified: Number(item.lastModified ?? 0),
       }),

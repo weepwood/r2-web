@@ -12,7 +12,10 @@
   z-index: 800;
   overflow: hidden;
   isolation: isolate;
-  background: var(--wall-bg);
+  background:
+    radial-gradient(ellipse at 12% 13%, rgb(224 137 105 / 5%), transparent 38%),
+    radial-gradient(ellipse at 86% 82%, rgb(113 98 179 / 6%), transparent 38%),
+    var(--wall-bg);
   color: var(--wall-ink);
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -22,6 +25,15 @@
 .poster-wall[hidden],
 .poster-wall [hidden] {
   display: none !important;
+}
+/* A shallow static edge falloff, never a moving full-screen blur layer. */
+.poster-wall::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 69%, rgb(0 0 0 / 27%) 100%);
 }
 
 .poster-wall-viewport {
@@ -44,7 +56,8 @@
   width: 0;
   height: 0;
   transform-origin: 0 0;
-  will-change: transform;
+  /* Avoid a persistent GPU surface as large as the whole mosaic.
+     On a dense wall that surface can exceed the texture budget. */
   contain: layout style;
 }
 
@@ -65,7 +78,17 @@
   -webkit-tap-highlight-color: transparent;
 }
 .poster-tile:focus-visible { outline: 2px solid #f7f4ee; outline-offset: -2px; }
-.poster-tile.is-active { box-shadow: 0 0 0 1px rgb(247 244 238 / 28%), 0 10px 32px rgb(0 0 0 / 22%); }
+/* A restrained entrance wave, played once only for initially mounted tiles. */
+.poster-tile.is-entering {
+  animation: wall-poster-arrive 560ms cubic-bezier(.22,1,.36,1) both;
+  animation-delay: var(--wall-entrance-delay, 0ms);
+}
+@keyframes wall-poster-arrive {
+  0% { opacity: 0; transform: translate3d(0,34px,0) scale(.965); }
+  72% { opacity: 1; transform: translate3d(0,-3px,0) scale(1.005); }
+  100% { opacity: 1; transform: none; }
+}
+.poster-tile.is-active { box-shadow: 0 0 0 1px rgb(247 244 238 / 18%), 0 24px 64px rgb(0 0 0 / 42%); }
 .poster-tile-media, .poster-tile-shade, .poster-tile-copy { position: absolute; inset: 0; }
 
 .poster-tile-media {
@@ -180,14 +203,21 @@
   opacity: 1;
 }
 
-/* Focus hierarchy: adjacent work remains legible and spatially recognizable. */
-.poster-wall.has-active .poster-tile:not(.is-active) {
-  filter: brightness(.63) saturate(.76);
-  transition: filter 190ms ease;
+/* Darken without per-tile CSS filters: filters trigger costly offscreen
+   surfaces during a transform-heavy pan. A simple poster shade composites
+   cheaply and keeps the surrounding artwork spatially recognizable. */
+.poster-tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background: #070707;
+  opacity: 0;
+  transition: opacity 190ms ease;
 }
-.poster-wall.has-active .poster-tile:not(.is-active):is(:hover, :focus-visible) {
-  filter: brightness(.88) saturate(1);
-}
+.poster-wall.has-active .poster-tile:not(.is-active)::after { opacity: .39; }
+.poster-wall.has-active .poster-tile:not(.is-active):is(:hover, :focus-visible)::after { opacity: .13; }
 
 /* Chrome: no giant heading, only a quiet corner label and contextual controls. */
 .poster-wall-header, .poster-wall-hud, .poster-wall-controls,
@@ -274,9 +304,22 @@
 .poster-wall-fab:disabled { opacity: .28; cursor: not-allowed; }
 
 /* Inline actions follow the expanded image instead of floating in the center. */
+/* Contextual actions appear as the focused tile settles, never as a
+   permanent toolbar blocking the image. */
+.poster-wall-focus-actions:not([hidden]) {
+  animation: wall-actions-reveal 280ms cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes wall-actions-reveal {
+  from { opacity: 0; translate: 0 11px; }
+  to { opacity: 1; translate: 0 0; }
+}
 .poster-wall-focus-actions {
   top: 0;
   left: 0;
+  /* Position follows the camera through a composited transform, not
+     left/top layout updates on each frame. The independent CSS translate
+     property keeps the subtle entrance animation from overriding position. */
+  transform: translate3d(0,0,0);
   display: flex;
   gap: 7px;
   white-space: nowrap;
@@ -321,6 +364,101 @@
 }
 .poster-wall-empty span { font-size: 13px; }
 
+/* On-demand file locator and lightweight, local view bookmarks. */
+.poster-wall-search-panel {
+  position: absolute;
+  z-index: 24;
+  top: 72px;
+  right: 25px;
+  width: min(352px, calc(100vw - 34px));
+  padding: 15px;
+  border: 1px solid rgb(247 244 238 / 13%);
+  border-radius: 14px;
+  color: var(--wall-ink);
+  background: rgb(19 19 19 / 96%);
+  box-shadow: 0 16px 50px rgb(0 0 0 / 34%);
+  pointer-events: auto;
+}
+.poster-wall-search-panel label {
+  display: block;
+  margin-bottom: 9px;
+  color: rgb(247 244 238 / 73%);
+  font-size: 11px;
+  font-weight: 550;
+  letter-spacing: .01em;
+}
+.poster-wall-search-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+#wall-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 37px;
+  border: 1px solid rgb(247 244 238 / 16%);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: rgb(247 244 238 / 6%);
+  color: var(--wall-ink);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+#wall-search-input::placeholder { color: rgb(247 244 238 / 37%); }
+#wall-search-input:focus-visible {
+  border-color: rgb(247 244 238 / 58%);
+  box-shadow: 0 0 0 2px rgb(247 244 238 / 10%);
+}
+.poster-wall-search-step {
+  display: grid;
+  place-items: center;
+  flex: 0 0 32px;
+  height: 37px;
+  border: 1px solid rgb(247 244 238 / 13%);
+  border-radius: 7px;
+  background: rgb(247 244 238 / 6%);
+  color: var(--wall-ink);
+  cursor: pointer;
+}
+.poster-wall-search-step svg { width: 15px; height: 15px; }
+.poster-wall-search-step:is(:hover,:focus-visible) {
+  background: rgb(247 244 238 / 13%);
+  outline-offset: 2px;
+}
+.poster-wall-search-step:disabled { cursor: not-allowed; opacity: .32; }
+.poster-wall-search-status {
+  display: block;
+  min-height: 16px;
+  margin-top: 10px;
+  color: rgb(247 244 238 / 49%);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.poster-wall-notice {
+  position: absolute;
+  z-index: 25;
+  left: 50%;
+  bottom: 79px;
+  transform: translateX(-50%);
+  max-width: min(440px, calc(100vw - 30px));
+  padding: 9px 14px;
+  border: 1px solid rgb(247 244 238 / 15%);
+  border-radius: 99px;
+  color: rgb(247 244 238 / 90%);
+  background: rgb(22 22 22 / 93%);
+  box-shadow: 0 7px 27px rgb(0 0 0 / 22%);
+  text-align: center;
+  font-size: 11px;
+  pointer-events: none;
+}
+#wall-restore-view:not(:disabled) { border-color: rgb(247 244 238 / 24%); }
+@media (max-width: 640px) {
+  .poster-wall-search-panel { top: 67px; right: 15px; }
+  #wall-search-input { font-size: 16px; }
+  .poster-wall-notice { bottom: 165px; }
+}
+
 @media (hover:none), (pointer:coarse) {
   .poster-wall-fab { opacity: .88; }
   .poster-tile.is-compact:not(.is-active):not(:focus-visible) .poster-tile-copy { opacity: 0; transform: none; }
@@ -332,13 +470,16 @@
   .poster-wall-header h2 { font-size: 14px; }
   .poster-wall-eyebrow { font-size: 8px; }
   .poster-wall-controls { top: 19px; right: 15px; gap: 5px; }
-  .poster-wall-controls-bottom { top: auto; bottom: 18px; }
+  .poster-wall-controls-bottom { top: auto; bottom: 64px; }
   .poster-wall-fab { width: 38px; height: 38px; }
   .poster-wall-hud { bottom: 26px; left: 17px; font-size: 10px; gap: 7px; }
-  .poster-wall-more { right: 15px; bottom: 73px; }
+  .poster-wall-more { right: 15px; bottom: 118px; }
   .poster-wall-action { min-height: 37px; padding: 0 13px; }
   .poster-tile.is-active .poster-tile-title { font-size: 28px; }
   .poster-tile-copy { padding: 12px 16px 15px; }
+}
+@media (hover: none) and (pointer: coarse) {
+  .poster-tile.is-entering { animation-duration: 380ms; }
 }
 @media (prefers-reduced-motion: reduce) {
   .poster-wall *,

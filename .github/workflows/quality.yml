@@ -81,3 +81,9 @@ jobs:
         env:
           CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: pnpm test:browser
+
+      - name: 浏览器图片墙性能回归（240 张图片）
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+          R2_SMOKE_COUNT: '240'
+        run: pnpm test:browser

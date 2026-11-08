@@ -16,7 +16,7 @@ export const WALL_MOTIFS = Object.freeze([
 ])
 
 /** @typedef {{key:string, size?:number, lastModified?:number|string}} WallItem */
-/** @typedef {WallItem & {x:number,y:number,w:number,h:number}} WallTile */
+/** @typedef {WallItem & {x:number,y:number,w:number,h:number,blockIndex:number}} WallTile */
 
 /**
  * @param {WallItem[]} items
@@ -41,6 +41,7 @@ export function buildWallLayout(items, opts = {}) {
       if (next >= items.length) break
       tiles.push({
         ...items[next++],
+        blockIndex: block,
         x: col * motifW + x * stride,
         y: row * motifH + y * stride,
         w: w * stride - gap,
@@ -107,63 +108,68 @@ export function preserveTileAnchor(camera, before, after) {
 }
 
 /**
- * Do two rects have a visible gutter? The base mosaic already guarantees 6px.
- * @param {{x:number,y:number,w:number,h:number}} a
- * @param {{x:number,y:number,w:number,h:number}} b
- * @param {number} [gap]
- */
-function isSeparated(a, b, gap = WALL_GAP) {
-  return a.x + a.w + gap <= b.x || b.x + b.w + gap <= a.x ||
-    a.y + a.h + gap <= b.y || b.y + b.h + gap <= a.y
-}
-
-/**
- * Find the nearest empty spot without moving already placed rectangles.
- * A bounded best-first search projects to exact blocker edges, avoiding
- * infinite incremental physics iterations and accidental overlaps.
- * @param {{x:number,y:number,w:number,h:number}} original
- * @param {{x:number,y:number,w:number,h:number}[]} placed
- */
-function nearestFreePosition(original, placed) {
-  const pending = [{...original, cost: 0}]
-  const visited = new Set([`${original.x.toFixed(2)},${original.y.toFixed(2)}`])
-  let attempts = 0
-  while (pending.length && attempts++ < 800) {
-    pending.sort((a, b) => a.cost - b.cost)
-    const current = pending.shift()
-    if (!current) break
-    const blocker = placed.find((existing) => !isSeparated(current, existing))
-    if (!blocker) return {x:current.x,y:current.y,w:original.w,h:original.h}
-
-    const alternatives = [
-      [blocker.x - original.w - WALL_GAP, current.y],
-      [blocker.x + blocker.w + WALL_GAP, current.y],
-      [current.x, blocker.y - original.h - WALL_GAP],
-      [current.x, blocker.y + blocker.h + WALL_GAP],
-    ]
-    for (const [x, y] of alternatives) {
-      const id = `${x.toFixed(2)},${y.toFixed(2)}`
-      if (visited.has(id)) continue
-      visited.add(id)
-      pending.push({
-        x, y, w:original.w, h:original.h,
-        cost:(x - original.x) ** 2 + (y - original.y) ** 2,
-      })
-    }
-  }
-
-  // The field is open-ended: if a dense cluster exhausts the local search,
-  // put this tile to the right of the occupied region rather than overlap.
-  const right = Math.max(...placed.map((rect) => rect.x + rect.w))
-  return {...original, x:right + WALL_GAP}
-}
-
-/**
- * Expand the active tile and resolve neighbors without any rectangle overlap.
+ * A focus changes only the tile's own 6x4 geometric block, keeping every
+ * other block anchored. Within that block we repartition integer cells into
+ * exact, non-overlapping rectangles rather than pushing thousands of tiles
+ * with a global collision solver.
  *
- * Place distant tiles first so they keep their original coordinates; tiles
- * close to the focus choose the nearest free position. As the wall is dense,
- * there can be a small local chain of displaced neighbors at the boundary.
+ * This is an original deterministic block-partition implementation; it does
+ * not use Folia's precomputed block-reflow tables.
+ */
+
+/** @typedef {{x:number,y:number,w:number,h:number}} CellRect */
+
+/** @param {CellRect} area @param {number} count @returns {CellRect[]} */
+function splitRegion(area, count) {
+  if (count <= 1) return [area]
+  const width = area.w
+  const height = area.h
+  if (width * height < count) throw new Error('Wall block cannot fit enough tiles')
+
+  const splitX = width >= height ? width > 1 : height <= 1
+  // Choose a cut that can hold at least one cell for each resulting tile.
+  const side = splitX ? width : height
+  const stride = splitX ? height : width
+  const leftCount = Math.floor(count / 2)
+  const minCut = Math.max(1, Math.ceil(leftCount / stride))
+  const maxCut = Math.min(side - 1, Math.floor((side * stride - (count - leftCount)) / stride))
+  const cut = Math.max(minCut, Math.min(maxCut, Math.round(side * leftCount / count)))
+  const first = splitX
+    ? {x:area.x,y:area.y,w:cut,h:height}
+    : {x:area.x,y:area.y,w:width,h:cut}
+  const second = splitX
+    ? {x:area.x+cut,y:area.y,w:width-cut,h:height}
+    : {x:area.x,y:area.y+cut,w:width,h:height-cut}
+  return [...splitRegion(first,leftCount), ...splitRegion(second,count-leftCount)]
+}
+
+/** @param {CellRect[]} zones @param {number} count @returns {CellRect[]} */
+function partitionZones(zones, count) {
+  if (count < zones.length) throw new Error('Not enough tiles for wall zones')
+  const quotas = zones.map(() => 1)
+  for (let i = zones.length; i < count; i++) {
+    let best = -1
+    let ratio = -1
+    zones.forEach((zone, index) => {
+      const area = zone.w * zone.h
+      if (quotas[index] >= area) return
+      const score = area / quotas[index]
+      if (score > ratio) { ratio = score; best = index }
+    })
+    if (best < 0) throw new Error('No available wall cells')
+    quotas[best]++
+  }
+  return zones.flatMap((zone, index) => splitRegion(zone, quotas[index]))
+}
+
+/** @param {CellRect} a @param {CellRect} b */
+function centerDistance(a, b) {
+  const dx = (a.x+a.w/2) - (b.x+b.w/2)
+  const dy = (a.y+a.h/2) - (b.y+b.h/2)
+  return dx*dx+dy*dy
+}
+
+/**
  * @param {WallTile[]} layout
  * @param {string|null} activeKey
  * @returns {Map<string,{x:number,y:number,w:number,h:number}>}
@@ -171,37 +177,75 @@ function nearestFreePosition(original, placed) {
 export function focusReflow(layout, activeKey) {
   const positions = new Map(layout.map(({key,x,y,w,h}) => [key,{x,y,w,h}]))
   if (!activeKey) return positions
-  const current = positions.get(activeKey)
-  if (!current) return positions
+  const active = layout.find((tile) => tile.key === activeKey)
+  if (!active) return positions
+  const blockTiles = layout.filter((tile) => tile.blockIndex === active.blockIndex)
+  for (const [key, rect] of focusBlockReflow(blockTiles, activeKey)) positions.set(key, rect)
+  return positions
+}
 
-  // Reduced expansion still clearly emphasizes the image, but spares more of
-  // the neighboring mosaic from movement.
-  const width = Math.max(current.w * 1.44, 430)
-  const height = Math.max(current.h * 1.42, 350)
-  const expanded = {
-    x:current.x - (width - current.w) * .3,
-    y:current.y - (height - current.h) * .25,
-    w:width, h:height,
-  }
-  positions.set(activeKey, expanded)
+/**
+ * Compute only the selected 6x4 block. This is the hot path for changing
+ * focus; rebuilding the global rectangle map for 10k+ images is unnecessary.
+ *
+ * @param {WallTile[]} blockTiles
+ * @param {string} activeKey
+ * @returns {Map<string,{x:number,y:number,w:number,h:number}>}
+ */
+export function focusBlockReflow(blockTiles, activeKey) {
+  /** @type {Map<string,{x:number,y:number,w:number,h:number}>} */
+  const positions = new Map()
+  const selected = blockTiles.find((item) => item.key === activeKey)
+  if (!selected) return positions
+  const neighbors = blockTiles.filter((tile) => tile.key !== activeKey)
 
-  const centerX = expanded.x + expanded.w / 2
-  const centerY = expanded.y + expanded.h / 2
-  /** @param {{x:number,y:number,w:number,h:number}} rect */
-  const distance = (rect) => (rect.x + rect.w / 2 - centerX) ** 2 +
-    (rect.y + rect.h / 2 - centerY) ** 2
+  const stride = WALL_CELL + WALL_GAP
+  const originX = Math.floor(selected.x / (6*stride)) * 6*stride
+  const originY = Math.floor(selected.y / (4*stride)) * 4*stride
+  const xCell = (selected.x-originX) / stride
+  const yCell = (selected.y-originY) / stride
+  const widthCells = (selected.w+WALL_GAP) / stride
+  const heightCells = (selected.h+WALL_GAP) / stride
+  const focusW = 4
+  const focusH = 3
+  const fx = Math.max(0,Math.min(6-focusW,Math.round(xCell + widthCells/2-focusW/2)))
+  const fy = Math.max(0,Math.min(4-focusH,Math.round(yCell + heightCells/2-focusH/2)))
 
-  const neighbors = layout
-    .filter((tile) => tile.key !== activeKey)
-    .sort((a, b) => distance(b) - distance(a))
-  const placed = [expanded]
+  /** @type {CellRect[]} */
+  const zones = [
+    {x:0,y:0,w:6,h:fy},
+    {x:0,y:fy,w:fx,h:focusH},
+    {x:fx+focusW,y:fy,w:6-fx-focusW,h:focusH},
+    {x:0,y:fy+focusH,w:6,h:4-fy-focusH},
+  ].filter((zone)=>zone.w>0 && zone.h>0)
 
-  for (const tile of neighbors) {
-    const original = positions.get(tile.key)
-    if (!original) continue
-    const next = nearestFreePosition(original, placed)
-    positions.set(tile.key, next)
-    placed.push(next)
+  /** @param {CellRect} rect */
+  const absolute = (rect) => ({
+    x:originX+rect.x*stride,y:originY+rect.y*stride,
+    w:rect.w*stride-WALL_GAP,h:rect.h*stride-WALL_GAP,
+  })
+  positions.set(selected.key,absolute({x:fx,y:fy,w:focusW,h:focusH}))
+
+  // Assign the remaining tiles to the nearest available rectangular slot.
+  // A block holds only seven or eight tiles; no global neighbor search.
+  // The final block may contain fewer images than geometric zones.
+  // Leave unused areas empty rather than inventing duplicate image tiles.
+  const occupiedZones = neighbors.length < zones.length
+    ? [...zones].sort((a,b)=>b.w*b.h-a.w*a.h).slice(0,neighbors.length)
+    : zones
+  const slots = neighbors.length ? partitionZones(occupiedZones,neighbors.length) : []
+  const remaining = [...slots]
+  for(const tile of neighbors) {
+    const original = {
+      x:(tile.x-originX)/stride,y:(tile.y-originY)/stride,
+      w:(tile.w+WALL_GAP)/stride,h:(tile.h+WALL_GAP)/stride,
+    }
+    let best=0
+    for(let index=1;index<remaining.length;index++) {
+      if(centerDistance(original,remaining[index])<centerDistance(original,remaining[best])) best=index
+    }
+    const chosen=remaining.splice(best,1)[0]
+    positions.set(tile.key,absolute(chosen))
   }
   return positions
 }

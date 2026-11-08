@@ -28,11 +28,10 @@ const mime = {
   '.ico': 'image/x-icon',
 }
 const pixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9UV5qwkAAAAASUVORK5CYII=', 'base64')
+const IMAGE_COUNT = Number(process.env.R2_SMOKE_COUNT || 3)
 const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult><IsTruncated>false</IsTruncated>
-<Contents><Key>poster-01.jpg</Key><Size>20480</Size><LastModified>2026-11-01T10:00:00Z</LastModified></Contents>
-<Contents><Key>poster-02.jpg</Key><Size>30720</Size><LastModified>2026-11-01T11:00:00Z</LastModified></Contents>
-<Contents><Key>poster-03.jpg</Key><Size>40960</Size><LastModified>2026-11-01T12:00:00Z</LastModified></Contents>
+${Array.from({length:IMAGE_COUNT}, (_, i) => `<Contents><Key>poster-${String(i+1).padStart(4,'0')}.jpg</Key><Size>20480</Size><LastModified>2026-11-01T10:00:00Z</LastModified></Contents>`).join('')}
 </ListBucketResult>`
 
 const server = createServer(async (req, res) => {
@@ -179,7 +178,7 @@ try {
 
   await eventually(() => cdp.evaluate(
     `Boolean(document.querySelector('#app') && !document.querySelector('#app').hidden &&
-      document.querySelectorAll('#file-grid .file-card').length === 3)`
+      document.querySelectorAll('#file-grid .file-card').length === ${IMAGE_COUNT})`
   ), 'connected R2 file list')
 
   await cdp.evaluate(`document.querySelector('#view-wall-btn').click()`)
@@ -187,6 +186,60 @@ try {
     `Boolean(!document.querySelector('#poster-wall').hidden &&
       document.querySelectorAll('.poster-tile').length > 0)`
   ), 'PosterWall opening')
+
+  if (IMAGE_COUNT >= 200) {
+    const before = await cdp.evaluate(`Number(document.querySelector('#poster-wall').dataset.wallRenderPasses || 0)`)
+    const benchmark = await cdp.evaluate(`(async () => {
+      const viewport = document.querySelector('#poster-wall-viewport')
+      for (let i=0; i<48; i++) {
+        viewport.dispatchEvent(new WheelEvent('wheel', {
+          bubbles:true,cancelable:true,deltaMode:0,deltaY:22
+        }))
+        await new Promise(requestAnimationFrame)
+      }
+      return {
+        passes:Number(document.querySelector('#poster-wall').dataset.wallRenderPasses || 0),
+        mounted:document.querySelectorAll('#poster-wall-canvas .poster-tile').length,
+      }
+    })()`)
+    assert.ok(benchmark.mounted <= 180,
+      `Expected <=180 mounted tiles, got ${benchmark.mounted}`)
+    assert.ok(benchmark.passes - before < 18,
+      `Expected fewer than 18 DOM reconciles in 48 wheel frames, got ${benchmark.passes-before}`)
+    console.log(`Wall stress: ${IMAGE_COUNT} objects / 48 wheel frames / ${benchmark.passes-before} DOM reconciles / ${benchmark.mounted} mounted tiles`)
+    // The focus test below should still click a visible tile, so reset
+    // the camera after panning the large synthetic gallery.
+    await cdp.evaluate(`document.querySelector('#wall-reset').click()`)
+    await pause(350)
+
+    // Three discrete wheel notches must retain the entire requested distance.
+    // Previously each event restarted a tween and silently lost displacement.
+    const wheelMotion = await cdp.evaluate(`(async () => {
+      const viewport = document.querySelector('#poster-wall-viewport')
+      const cameraY = () => {
+        const match = viewport.querySelector('#poster-wall-canvas').style.transform
+          .match(/translate3d\\([^,]+,\\s*([0-9.+-]+)px,/)
+        return match ? Number(match[1]) : NaN
+      }
+      await new Promise(resolve => setTimeout(resolve,170))
+      const start=cameraY()
+      for(let i=0;i<3;i++){
+        viewport.dispatchEvent(new WheelEvent('wheel',{
+          bubbles:true,cancelable:true,deltaMode:0,deltaY:100
+        }))
+        await new Promise(resolve => setTimeout(resolve,27))
+      }
+      await new Promise(resolve => setTimeout(resolve,950))
+      return {start,end:cameraY()}
+    })()`)
+    assert.ok(Number.isFinite(wheelMotion.start) && Number.isFinite(wheelMotion.end),
+      'wheel camera coordinates must be finite')
+    assert.ok(Math.abs(wheelMotion.end - wheelMotion.start + 300) < 9,
+      `Three discrete wheel steps should pan 300px, got ${wheelMotion.end-wheelMotion.start}`)
+    console.log(`Wheel continuity: three notches moved ${(wheelMotion.end-wheelMotion.start).toFixed(1)}px`)
+    await cdp.evaluate(`document.querySelector('#wall-reset').click()`)
+    await pause(350)
+  }
 
   // The HTML hidden property alone is insufficient: display:flex/grid rules
   // must not accidentally reveal controls that are meant to be invisible.
@@ -199,12 +252,98 @@ try {
   })()`)
   assert.equal(visibility, true, 'contextual controls and empty state must be visually hidden')
 
+  const cameraSnapshot = `(() => {
+    const transform = getComputedStyle(document.querySelector('#poster-wall-canvas')).transform
+    const matrix = new DOMMatrix(transform)
+    return {x:matrix.m41,y:matrix.m42,scale:matrix.a}
+  })()`
+
+  // Search is local to loaded image keys. Jumping to a result expands the
+  // selected poster without fetching the entire Bucket.
+  await cdp.evaluate(`document.querySelector('#wall-search-toggle').click()`)
+  assert.equal(await cdp.evaluate(`document.querySelector('#wall-search-panel').hidden`),false)
+  const searchResult = await cdp.evaluate(`(() => {
+    const input=document.querySelector('#wall-search-input')
+    input.value='poster-0002'
+    input.dispatchEvent(new Event('input',{bubbles:true}))
+    return {
+      enabled:!document.querySelector('#wall-search-next').disabled,
+      status:document.querySelector('#wall-search-status').textContent
+    }
+  })()`)
+  assert.equal(searchResult.enabled,true)
+  assert.match(searchResult.status,/1/)
+  await cdp.evaluate(`document.querySelector('#wall-search-next').click()`)
+  await eventually(() => cdp.evaluate(
+    `document.querySelector('.poster-tile.is-active')?.dataset.key === 'poster-0002.jpg'`
+  ), 'search jump to exact picture')
+  await cdp.evaluate(`document.querySelector('#wall-search-toggle').click()`)
+  await pause(510)
+  await cdp.evaluate(`document.querySelector('#wall-collapse').click()`)
+  await pause(430)
+
+  // PageUp/PageDown work from the keyboard without scanning the DOM for
+  // virtualized images. Search-field arrow keys remain normal caret movement.
+  const keyboard = await cdp.evaluate(`(() => {
+    const viewport=document.querySelector('#poster-wall-viewport')
+    viewport.focus()
+    const send=(key)=>viewport.dispatchEvent(new KeyboardEvent('keydown',{
+      key,bubbles:true,cancelable:true
+    }))
+    send('PageDown')
+    const first=document.querySelector('.poster-tile.is-active')?.dataset.key
+    send('PageDown')
+    const second=document.querySelector('.poster-tile.is-active')?.dataset.key
+    send('PageUp')
+    const previous=document.querySelector('.poster-tile.is-active')?.dataset.key
+    return {first,second,previous}
+  })()`)
+  assert.ok(keyboard.first)
+  assert.notEqual(keyboard.first,keyboard.second)
+  assert.equal(keyboard.first,keyboard.previous)
+  await pause(500)
+  await cdp.evaluate(`document.querySelector('#wall-collapse').click()`)
+  await pause(440)
+
+  // World-space bookmarks are persisted per folder, and the saved camera
+  // survives both additional panning and closing/reopening the presentation.
+  const savedCamera=await cdp.evaluate(cameraSnapshot)
+  await cdp.evaluate(`document.querySelector('#wall-save-view').click()`)
+  assert.equal(await cdp.evaluate(`document.querySelector('#wall-restore-view').disabled`),false)
+  await cdp.evaluate(`document.querySelector('#wall-zoom-in').click()`)
+  await pause(360)
+  const movedCamera=await cdp.evaluate(cameraSnapshot)
+  assert.ok(Math.abs(savedCamera.scale-movedCamera.scale)>.01)
+  await cdp.evaluate(`document.querySelector('#wall-restore-view').click()`)
+  await pause(520)
+  const restoredCamera=await cdp.evaluate(cameraSnapshot)
+  for(const key of ['x','y','scale']){
+    assert.ok(Math.abs(savedCamera[key]-restoredCamera[key]) < 2,
+      `Saved camera restore mismatch ${key}: before=${savedCamera[key]} after=${restoredCamera[key]}`)
+  }
+  await cdp.evaluate(`document.querySelector('#wall-close').click()`)
+  await cdp.evaluate(`document.querySelector('#view-wall-btn').click()`)
+  await eventually(() => cdp.evaluate(
+    `!document.querySelector('#poster-wall').hidden &&
+      !document.querySelector('#wall-restore-view').disabled`
+  ), 'saved scene persists across wall reopen')
+  await cdp.evaluate(`document.querySelector('#wall-restore-view').click()`)
+  await pause(520)
+  const reopenedCamera=await cdp.evaluate(cameraSnapshot)
+  for(const key of ['x','y','scale']){
+    assert.ok(Math.abs(savedCamera[key]-reopenedCamera[key]) < 2,
+      `Persisted scene mismatch ${key}: before=${savedCamera[key]} after=${reopenedCamera[key]}`)
+  }
+  console.log('PosterWall workspace passed: search, keyboard navigation, folder bookmark restore')
+
   const before = await cdp.evaluate(`document.querySelector('#poster-wall-canvas').style.transform`)
   await cdp.evaluate(`document.querySelector('#wall-zoom-in').click()`)
   await eventually(async () => {
     const next = await cdp.evaluate(`document.querySelector('#poster-wall-canvas').style.transform`)
     return next !== before
   }, 'zoom-in camera transform')
+  await pause(320)
+  const beforeFocus = await cdp.evaluate(cameraSnapshot)
   await cdp.evaluate(`document.querySelector('.poster-tile').click()`)
   await eventually(() => cdp.evaluate(
     `Boolean(document.querySelector('.poster-tile.is-active') &&
@@ -218,6 +357,22 @@ try {
       document.querySelector('#preview-body img')?.src)`
   ), 'original preview dialog')
   await cdp.evaluate(`document.querySelector('#preview-dialog').close()`)
+  // Focusing must move the contextual action through the compositor and
+  // collapsing must restore the exact pre-focus camera, not leave a zoomed
+  // wall stranded around the enlarged tile.
+  const actionTransform = await cdp.evaluate(
+    `document.querySelector('#wall-focus-actions').style.transform`)
+  assert.ok(actionTransform.startsWith('translate3d('))
+  await cdp.evaluate(`document.querySelector('#wall-collapse').click()`)
+  await eventually(() => cdp.evaluate(
+    `!document.querySelector('.poster-tile.is-active')`
+  ), 'poster tile collapse')
+  await pause(440)
+  const afterFocus = await cdp.evaluate(cameraSnapshot)
+  for (const name of ['x','y','scale']) {
+    assert.ok(Math.abs(beforeFocus[name] - afterFocus[name]) < 1.6,
+      `Collapse should restore ${name}: before=${beforeFocus[name]} after=${afterFocus[name]}`)
+  }
   await cdp.evaluate(`document.querySelector('#wall-close').click()`)
   assert.equal(await cdp.evaluate(`document.querySelector('#poster-wall').hidden`), true)
 
