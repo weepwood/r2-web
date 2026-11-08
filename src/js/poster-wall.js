@@ -826,7 +826,16 @@ class PosterWall {
         if (!upgrade) img.removeAttribute('src')
         settle(false)
       }
-      img.onload = () => settle(true)
+      img.onload = () => {
+        if (!upgrade || typeof img.decode !== 'function') {
+          settle(true)
+          return
+        }
+        // onload only confirms bytes arrived; the image may still need a
+        // costly decode. Keep the old thumbnail painted until the new bitmap
+        // is ready, so a large variant never flashes or stalls focus motion.
+        void img.decode().then(() => settle(true), () => settle(false))
+      }
       img.onerror = () => settle(false)
       img.src = url
     })
