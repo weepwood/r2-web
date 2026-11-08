@@ -283,7 +283,7 @@ try {
   // wall stranded around the enlarged tile.
   const actionTransform = await cdp.evaluate(
     `document.querySelector('#wall-focus-actions').style.transform`)
-  assert.match(actionTransform, /translate3d\\(/)
+  assert.ok(actionTransform.startsWith('translate3d('))
   await cdp.evaluate(`document.querySelector('#wall-collapse').click()`)
   await eventually(() => cdp.evaluate(
     `!document.querySelector('.poster-tile.is-active')`
