@@ -26,6 +26,13 @@ class PosterWall {
   #viewport
   /** @type {HTMLElement} */
   #canvas
+  /** @type {HTMLElement} */
+  #focusActions
+  /** @type {HTMLElement} */
+  #countNode
+  /** @type {HTMLElement} */
+  #zoomNode
+  #lastCountValue = -1
   /** @type {ImageItem[]} */
   #items = []
   /** @type {ReturnType<typeof buildWallLayout>} */
@@ -89,6 +96,9 @@ class PosterWall {
     this.#root = /** @type {HTMLElement} */ (document.querySelector('#poster-wall'))
     this.#viewport = /** @type {HTMLElement} */ (document.querySelector('#poster-wall-viewport'))
     this.#canvas = /** @type {HTMLElement} */ (document.querySelector('#poster-wall-canvas'))
+    this.#focusActions = /** @type {HTMLElement} */ (document.querySelector('#wall-focus-actions'))
+    this.#countNode = /** @type {HTMLElement} */ (document.querySelector('#wall-count'))
+    this.#zoomNode = /** @type {HTMLElement} */ (document.querySelector('#wall-zoom-value'))
     this.#reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (event) => {
       this.#reducedMotion = event.matches
@@ -215,6 +225,7 @@ class PosterWall {
   }
 
   refreshLabels() {
+    this.#lastCountValue = -1
     this.#root.setAttribute('aria-label', t('viewWall'))
     this.#viewport.setAttribute('aria-label', t('wallHelp'))
     document.querySelector('#wall-eyebrow').textContent = t('wallEyebrow')
@@ -397,8 +408,8 @@ class PosterWall {
     }
     this.#updateHud()
     if (this.#activeKey) {
-      const actions = /** @type {HTMLElement} */ (document.querySelector('#wall-focus-actions'))
-      actions.hidden = !this.#positionFocusActions(actions)
+      const visible = this.#positionFocusActions(this.#focusActions)
+      if (this.#focusActions.hidden === visible) this.#focusActions.hidden = !visible
     }
   }
 
@@ -489,7 +500,7 @@ class PosterWall {
     this.#imageQueue.sort((a, b) => this.#imagePriority(a.key) - this.#imagePriority(b.key))
     this.#pumpImages()
     this.#root.classList.toggle('has-active', Boolean(this.#activeKey))
-    const focusActions = /** @type {HTMLElement} */ (document.querySelector('#wall-focus-actions'))
+    const focusActions = this.#focusActions
     const emptyState = /** @type {HTMLElement} */ (document.querySelector('#wall-empty'))
     const moreControl = /** @type {HTMLElement} */ (document.querySelector('#wall-more'))
     const actionsVisible = this.#activeKey ? this.#positionFocusActions(focusActions) : false
@@ -523,8 +534,8 @@ class PosterWall {
     const width = 220
     const left = Math.max(14, Math.min(projectedRight - width, viewportWidth - width - 14))
     const top = Math.max(79, Math.min(projectedBottom + 10, viewportHeight - 76))
-    actions.style.left = `${left}px`
-    actions.style.top = `${top}px`
+    const position = `translate3d(${Math.round(left)}px, ${Math.round(top)}px, 0)`
+    if (actions.style.transform !== position) actions.style.transform = position
     return true
   }
 
@@ -632,13 +643,14 @@ class PosterWall {
   }
 
   #updateHud() {
-    const count = document.querySelector('#wall-count')
-    const zoom = document.querySelector('#wall-zoom-value')
-    const countLabel = t('wallCount', { count: this.#items.length })
+    // Count translation is recomputed only when the file count or locale
+    // changes; camera frames only check the small numeric zoom value.
+    if (this.#lastCountValue !== this.#items.length) {
+      this.#lastCountValue = this.#items.length
+      this.#countNode.textContent = t('wallCount', { count: this.#items.length })
+    }
     const zoomLabel = Math.round(this.#camera.scale * 100) + '%'
-    // Avoid changing text nodes and invalidating layout on every pan frame.
-    if (count && count.textContent !== countLabel) count.textContent = countLabel
-    if (zoom && zoom.textContent !== zoomLabel) zoom.textContent = zoomLabel
+    if (this.#zoomNode.textContent !== zoomLabel) this.#zoomNode.textContent = zoomLabel
   }
 
   /** @param {string} key */
