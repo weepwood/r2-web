@@ -387,8 +387,8 @@ class PosterWall {
   #updateSearchResults() {
     this.#searchResults = searchWallItems(this.#items, this.#searchInput.value)
     this.#searchIndex = this.#searchResults.indexOf(this.#activeKey ?? '')
-    document.querySelector('#wall-search-prev').disabled = !this.#searchResults.length
-    document.querySelector('#wall-search-next').disabled = !this.#searchResults.length
+    /** @type {HTMLButtonElement} */ (document.querySelector('#wall-search-prev')).disabled = !this.#searchResults.length
+    /** @type {HTMLButtonElement} */ (document.querySelector('#wall-search-next')).disabled = !this.#searchResults.length
     this.#renderSearchStatus()
   }
 
