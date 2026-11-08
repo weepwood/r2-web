@@ -308,6 +308,126 @@ class PosterWall {
     this.#updateHud()
   }
 
+  /**
+   * A scene bookmark stores only camera geometry. Never persist R2 URLs,
+   * access credentials, object bytes, or a full list of image keys.
+   */
+  #sceneKey() {
+    const scope = this.#getScope()
+    return scope ? wallSceneStorageKey(scope) : null
+  }
+
+  #readSavedView() {
+    const key = this.#sceneKey()
+    if (!key) return null
+    try {
+      const stored = localStorage.getItem(key)
+      return stored ? validWallScene(JSON.parse(stored)) : null
+    } catch { return null }
+  }
+
+  #refreshSavedView() {
+    this.#sceneRestoreButton.disabled = !this.#readSavedView()
+  }
+
+  /** @param {'wallViewSaved'|'wallViewRestored'|'wallViewSaveFailed'|'wallViewUnavailable'} key */
+  #notify(key) {
+    window.clearTimeout(this.#noticeTimer)
+    this.#noticeNode.textContent = t(key)
+    this.#noticeNode.hidden = false
+    this.#noticeTimer = window.setTimeout(() => {
+      this.#noticeNode.hidden = true
+      this.#noticeTimer = 0
+    }, 2600)
+  }
+
+  #saveView() {
+    if (!this.isOpen) return
+    const key = this.#sceneKey()
+    const view = captureWallScene(this.#camera,
+      this.#viewport.clientWidth,this.#viewport.clientHeight)
+    if (!key || !validWallScene(view)) {
+      this.#notify('wallViewSaveFailed')
+      return
+    }
+    try {
+      localStorage.setItem(key, JSON.stringify(view))
+      this.#refreshSavedView()
+      this.#notify('wallViewSaved')
+    } catch {
+      this.#notify('wallViewSaveFailed')
+    }
+  }
+
+  #restoreView() {
+    const saved = this.#readSavedView()
+    const target = restoreWallScene(saved,
+      this.#viewport.clientWidth,this.#viewport.clientHeight)
+    if (!this.isOpen || !target) {
+      this.#refreshSavedView()
+      this.#notify('wallViewUnavailable')
+      return
+    }
+    if (this.#activeKey) this.#toggle(this.#activeKey)
+    this.#focusReturnCamera = null
+    this.#animateCamera(target, 430)
+    this.#notify('wallViewRestored')
+  }
+
+  /** @param {boolean} open */
+  #setSearchOpen(open) {
+    this.#searchPanel.hidden = !open
+    document.querySelector('#wall-search-toggle').setAttribute('aria-expanded', String(open))
+    if (open) {
+      this.#searchInput.focus({preventScroll:true})
+      this.#searchInput.select()
+    }
+  }
+
+  #updateSearchResults() {
+    this.#searchResults = searchWallItems(this.#items, this.#searchInput.value)
+    this.#searchIndex = this.#searchResults.indexOf(this.#activeKey ?? '')
+    document.querySelector('#wall-search-prev').disabled = !this.#searchResults.length
+    document.querySelector('#wall-search-next').disabled = !this.#searchResults.length
+    this.#renderSearchStatus()
+  }
+
+  #renderSearchStatus() {
+    if (!this.#searchInput.value.trim()) {
+      this.#searchStatus.textContent = t('wallSearchHint')
+    } else if (!this.#searchResults.length) {
+      this.#searchStatus.textContent = t('wallSearchNone')
+    } else {
+      this.#searchStatus.textContent = t('wallSearchResults', {
+        index:this.#searchIndex+1,total:this.#searchResults.length,
+      })
+    }
+  }
+
+  /** @param {number} direction */
+  #stepSearch(direction) {
+    const count = this.#searchResults.length
+    if (!count) return
+    this.#searchIndex = this.#searchIndex < 0
+      ? (direction > 0 ? 0 : count-1)
+      : (this.#searchIndex + direction + count) % count
+    const key = this.#searchResults[this.#searchIndex]
+    if (key !== this.#activeKey) this.#toggle(key)
+    this.#renderSearchStatus()
+  }
+
+  /** @param {number} direction */
+  #stepImage(direction) {
+    if (!this.#items.length) return
+    const index = this.#items.findIndex(item => item.key === this.#activeKey)
+    const next = index < 0 ? (direction > 0 ? 0 : this.#items.length-1)
+      : (index+direction+this.#items.length)%this.#items.length
+    const key = this.#items[next].key
+    if (key !== this.#activeKey) this.#toggle(key)
+    this.#searchIndex = this.#searchResults.indexOf(key)
+    this.#renderSearchStatus()
+  }
+
   #recalculate() {
     this.#layout = buildWallLayout(this.#items, { columns: this.#columnCount })
     this.#tileByKey = new Map(this.#layout.map((tile) => [tile.key, tile]))
