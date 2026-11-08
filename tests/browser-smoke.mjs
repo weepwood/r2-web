@@ -258,6 +258,13 @@ try {
     const next = await cdp.evaluate(`document.querySelector('#poster-wall-canvas').style.transform`)
     return next !== before
   }, 'zoom-in camera transform')
+  await pause(320)
+  const cameraSnapshot = `(() => {
+    const transform = getComputedStyle(document.querySelector('#poster-wall-canvas')).transform
+    const matrix = new DOMMatrix(transform)
+    return {x:matrix.m41,y:matrix.m42,scale:matrix.a}
+  })()`
+  const beforeFocus = await cdp.evaluate(cameraSnapshot)
   await cdp.evaluate(`document.querySelector('.poster-tile').click()`)
   await eventually(() => cdp.evaluate(
     `Boolean(document.querySelector('.poster-tile.is-active') &&
@@ -271,6 +278,22 @@ try {
       document.querySelector('#preview-body img')?.src)`
   ), 'original preview dialog')
   await cdp.evaluate(`document.querySelector('#preview-dialog').close()`)
+  // Focusing must move the contextual action through the compositor and
+  // collapsing must restore the exact pre-focus camera, not leave a zoomed
+  // wall stranded around the enlarged tile.
+  const actionTransform = await cdp.evaluate(
+    `document.querySelector('#wall-focus-actions').style.transform`)
+  assert.match(actionTransform, /translate3d\\(/)
+  await cdp.evaluate(`document.querySelector('#wall-collapse').click()`)
+  await eventually(() => cdp.evaluate(
+    `!document.querySelector('.poster-tile.is-active')`
+  ), 'poster tile collapse')
+  await pause(440)
+  const afterFocus = await cdp.evaluate(cameraSnapshot)
+  for (const name of ['x','y','scale']) {
+    assert.ok(Math.abs(beforeFocus[name] - afterFocus[name]) < 1.6,
+      `Collapse should restore ${name}: before=${beforeFocus[name]} after=${afterFocus[name]}`)
+  }
   await cdp.evaluate(`document.querySelector('#wall-close').click()`)
   assert.equal(await cdp.evaluate(`document.querySelector('#poster-wall').hidden`), true)
 
