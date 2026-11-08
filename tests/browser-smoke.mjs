@@ -252,6 +252,90 @@ try {
   })()`)
   assert.equal(visibility, true, 'contextual controls and empty state must be visually hidden')
 
+  const cameraSnapshot = `(() => {
+    const transform = getComputedStyle(document.querySelector('#poster-wall-canvas')).transform
+    const matrix = new DOMMatrix(transform)
+    return {x:matrix.m41,y:matrix.m42,scale:matrix.a}
+  })()`
+
+  // Search is local to loaded image keys. Jumping to a result expands the
+  // selected poster without fetching the entire Bucket.
+  await cdp.evaluate(`document.querySelector('#wall-search-toggle').click()`)
+  assert.equal(await cdp.evaluate(`document.querySelector('#wall-search-panel').hidden`),false)
+  const searchResult = await cdp.evaluate(`(() => {
+    const input=document.querySelector('#wall-search-input')
+    input.value='poster-0002'
+    input.dispatchEvent(new Event('input',{bubbles:true}))
+    return {
+      enabled:!document.querySelector('#wall-search-next').disabled,
+      status:document.querySelector('#wall-search-status').textContent
+    }
+  })()`)
+  assert.equal(searchResult.enabled,true)
+  assert.match(searchResult.status,/1/)
+  await cdp.evaluate(`document.querySelector('#wall-search-next').click()`)
+  await eventually(() => cdp.evaluate(
+    `document.querySelector('.poster-tile.is-active')?.dataset.key === 'poster-0002.jpg'`
+  ), 'search jump to exact picture')
+  await cdp.evaluate(`document.querySelector('#wall-search-toggle').click()`)
+  await pause(510)
+  await cdp.evaluate(`document.querySelector('#wall-collapse').click()`)
+  await pause(430)
+
+  // PageUp/PageDown work from the keyboard without scanning the DOM for
+  // virtualized images. Search-field arrow keys remain normal caret movement.
+  const keyboard = await cdp.evaluate(`(() => {
+    const viewport=document.querySelector('#poster-wall-viewport')
+    viewport.focus()
+    const send=(key)=>viewport.dispatchEvent(new KeyboardEvent('keydown',{
+      key,bubbles:true,cancelable:true
+    }))
+    send('PageDown')
+    const first=document.querySelector('.poster-tile.is-active')?.dataset.key
+    send('PageDown')
+    const second=document.querySelector('.poster-tile.is-active')?.dataset.key
+    send('PageUp')
+    const previous=document.querySelector('.poster-tile.is-active')?.dataset.key
+    return {first,second,previous}
+  })()`)
+  assert.ok(keyboard.first)
+  assert.notEqual(keyboard.first,keyboard.second)
+  assert.equal(keyboard.first,keyboard.previous)
+  await pause(500)
+  await cdp.evaluate(`document.querySelector('#wall-collapse').click()`)
+  await pause(440)
+
+  // World-space bookmarks are persisted per folder, and the saved camera
+  // survives both additional panning and closing/reopening the presentation.
+  const savedCamera=await cdp.evaluate(cameraSnapshot)
+  await cdp.evaluate(`document.querySelector('#wall-save-view').click()`)
+  assert.equal(await cdp.evaluate(`document.querySelector('#wall-restore-view').disabled`),false)
+  await cdp.evaluate(`document.querySelector('#wall-zoom-in').click()`)
+  await pause(360)
+  const movedCamera=await cdp.evaluate(cameraSnapshot)
+  assert.ok(Math.abs(savedCamera.scale-movedCamera.scale)>.01)
+  await cdp.evaluate(`document.querySelector('#wall-restore-view').click()`)
+  await pause(520)
+  const restoredCamera=await cdp.evaluate(cameraSnapshot)
+  for(const key of ['x','y','scale']){
+    assert.ok(Math.abs(savedCamera[key]-restoredCamera[key]) < 2,
+      `Saved camera restore mismatch ${key}: before=${savedCamera[key]} after=${restoredCamera[key]}`)
+  }
+  await cdp.evaluate(`document.querySelector('#wall-close').click()`)
+  await cdp.evaluate(`document.querySelector('#view-wall-btn').click()`)
+  await eventually(() => cdp.evaluate(
+    `!document.querySelector('#poster-wall').hidden &&
+      !document.querySelector('#wall-restore-view').disabled`
+  ), 'saved scene persists across wall reopen')
+  await cdp.evaluate(`document.querySelector('#wall-restore-view').click()`)
+  await pause(520)
+  const reopenedCamera=await cdp.evaluate(cameraSnapshot)
+  for(const key of ['x','y','scale']){
+    assert.ok(Math.abs(savedCamera[key]-reopenedCamera[key]) < 2,
+      `Persisted scene mismatch ${key}: before=${savedCamera[key]} after=${reopenedCamera[key]}`)
+  }
+  console.log('PosterWall workspace passed: search, keyboard navigation, folder bookmark restore')
+
   const before = await cdp.evaluate(`document.querySelector('#poster-wall-canvas').style.transform`)
   await cdp.evaluate(`document.querySelector('#wall-zoom-in').click()`)
   await eventually(async () => {
@@ -259,11 +343,6 @@ try {
     return next !== before
   }, 'zoom-in camera transform')
   await pause(320)
-  const cameraSnapshot = `(() => {
-    const transform = getComputedStyle(document.querySelector('#poster-wall-canvas')).transform
-    const matrix = new DOMMatrix(transform)
-    return {x:matrix.m41,y:matrix.m42,scale:matrix.a}
-  })()`
   const beforeFocus = await cdp.evaluate(cameraSnapshot)
   await cdp.evaluate(`document.querySelector('.poster-tile').click()`)
   await eventually(() => cdp.evaluate(
