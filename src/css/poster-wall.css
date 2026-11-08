@@ -310,12 +310,16 @@
   animation: wall-actions-reveal 280ms cubic-bezier(.22,1,.36,1) both;
 }
 @keyframes wall-actions-reveal {
-  from { opacity: 0; transform: translate3d(0,11px,0); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; translate: 0 11px; }
+  to { opacity: 1; translate: 0 0; }
 }
 .poster-wall-focus-actions {
   top: 0;
   left: 0;
+  /* Position follows the camera through a composited transform, not
+     left/top layout updates on each frame. The independent CSS translate
+     property keeps the subtle entrance animation from overriding position. */
+  transform: translate3d(0,0,0);
   display: flex;
   gap: 7px;
   white-space: nowrap;
