@@ -1084,6 +1084,24 @@ class PosterWall {
     this.#root.addEventListener('keydown', (event) => this.#keyDown(event))
     const onClick = (id, cb) => document.querySelector('#' + id).addEventListener('click', cb)
     onClick('wall-close', () => this.close())
+    onClick('wall-search-toggle', () => this.#setSearchOpen(this.#searchPanel.hidden))
+    onClick('wall-search-prev', () => this.#stepSearch(-1))
+    onClick('wall-search-next', () => this.#stepSearch(1))
+    onClick('wall-save-view', () => this.#saveView())
+    onClick('wall-restore-view', () => this.#restoreView())
+    this.#searchInput.addEventListener('input', () => this.#updateSearchResults())
+    this.#searchInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        event.stopPropagation()
+        this.#stepSearch(event.shiftKey ? -1 : 1)
+      } else if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        this.#setSearchOpen(false)
+        this.#viewport.focus({preventScroll:true})
+      }
+    })
     onClick('wall-zoom-in', () => this.zoom(1.23, undefined, undefined, true))
     onClick('wall-zoom-out', () => this.zoom(1 / 1.23, undefined, undefined, true))
     onClick('wall-reset', () => this.resetCamera(true))
@@ -1233,8 +1251,31 @@ class PosterWall {
 
   /** @param {KeyboardEvent} event */
   #keyDown(event) {
+    if (event.defaultPrevented) return
+    const editing = event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLTextAreaElement ||
+      (event.target instanceof HTMLElement && event.target.isContentEditable)
+    // Native browser Find cannot locate virtualized image titles, so Ctrl/Cmd+F
+    // searches only the images loaded into the currently open wall.
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+      event.preventDefault()
+      this.#setSearchOpen(true)
+      return
+    }
+    if (editing) return
+    if (!event.altKey && !event.ctrlKey && !event.metaKey && event.key === '/') {
+      event.preventDefault()
+      this.#setSearchOpen(true)
+      return
+    }
     if (event.altKey || event.ctrlKey || event.metaKey) return
-    if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Escape','+','=','-','0','Home'].includes(event.key)) {
+    if (event.key === 'Escape' && !this.#searchPanel.hidden) {
+      event.preventDefault()
+      this.#setSearchOpen(false)
+      this.#viewport.focus({preventScroll:true})
+      return
+    }
+    if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Escape','+','=','-','0','Home','PageUp','PageDown'].includes(event.key)) {
       this.#cancelCameraMotion()
       this.#cancelWheelMotion()
     }
@@ -1243,7 +1284,9 @@ class PosterWall {
     if (event.key === 'Escape') {
       if (this.#activeKey) this.#toggle(this.#activeKey)
       else this.close()
-    } else if (event.key === 'ArrowLeft') this.#camera.x += step
+    } else if (event.key === 'PageDown') this.#stepImage(1)
+    else if (event.key === 'PageUp') this.#stepImage(-1)
+    else if (event.key === 'ArrowLeft') this.#camera.x += step
     else if (event.key === 'ArrowRight') this.#camera.x -= step
     else if (event.key === 'ArrowUp') this.#camera.y += step
     else if (event.key === 'ArrowDown') this.#camera.y -= step
