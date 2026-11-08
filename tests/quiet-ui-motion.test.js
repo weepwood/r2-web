@@ -31,7 +31,7 @@ test('camera, spring and focus actions are brief, local and interruptible', () =
   assert.match(wall, /node\.dataset\.layoutRect !== layoutId/)
   assert.match(wall, /duration: 480, easing: 'linear'/)
   assert.match(wall, /#positionFocusActions\(actions\)/)
-  assert.match(wall, /return false[\s\S]*?actions\.style\.left/)
+  assert.match(wall, /return false[\s\S]*?actions\.style\.transform/)
 })
 
 test('full-window presentation isolates keyboard focus, while native dialog remains usable', () => {
