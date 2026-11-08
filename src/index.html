@@ -1128,6 +1128,11 @@
           <h2 id="wall-title">Infinite Canvas</h2>
         </header>
         <div class="poster-wall-controls">
+          <button id="wall-search-toggle" type="button" class="poster-wall-fab" aria-label="查找已加载图片" title="查找已加载图片" aria-controls="wall-search-panel" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+              <circle cx="10.8" cy="10.8" r="6.7"/><path d="m16 16 5 5"/>
+            </svg>
+          </button>
           <button id="wall-close" type="button" class="poster-wall-fab" aria-label="退出展示墙" title="退出展示墙">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
               <path d="M18 6 6 18M6 6l12 12"/>
@@ -1135,6 +1140,16 @@
           </button>
         </div>
         <div class="poster-wall-controls poster-wall-controls-bottom">
+          <button id="wall-save-view" type="button" class="poster-wall-fab" aria-label="保存当前视角" title="保存当前视角">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+              <path d="M5 20V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v15l-7-4-7 4Z"/><path d="M12 7v6M9 10h6"/>
+            </svg>
+          </button>
+          <button id="wall-restore-view" type="button" class="poster-wall-fab" aria-label="恢复已保存视角" title="恢复已保存视角" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+              <path d="M5 20V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v15l-7-4-7 4Z"/><path d="M8.5 10.5 11 13l4.5-5"/>
+            </svg>
+          </button>
           <button id="wall-zoom-out" type="button" class="poster-wall-fab" aria-label="缩小" title="缩小">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
               <circle cx="11" cy="11" r="8"/><path d="M7 11h8"/>
@@ -1151,6 +1166,20 @@
             </svg>
           </button>
         </div>
+        <div id="wall-search-panel" class="poster-wall-search-panel" role="search" hidden>
+          <label id="wall-search-label" for="wall-search-input">查找已加载图片</label>
+          <div class="poster-wall-search-row">
+            <input id="wall-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="输入文件名或目录路径" aria-describedby="wall-search-status"/>
+            <button id="wall-search-prev" class="poster-wall-search-step" type="button" aria-label="上一个结果" title="上一个结果" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+            </button>
+            <button id="wall-search-next" class="poster-wall-search-step" type="button" aria-label="下一个结果" title="下一个结果" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+          </div>
+          <span id="wall-search-status" class="poster-wall-search-status" role="status" aria-live="polite">搜索当前已加载的图片</span>
+        </div>
+        <div id="wall-notice" class="poster-wall-notice" role="status" aria-live="polite" hidden></div>
         <div class="poster-wall-hud">
           <span id="wall-count" aria-live="polite">0 images</span>
           <b id="wall-zoom-value">76%</b>
