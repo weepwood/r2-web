@@ -11,6 +11,7 @@ import { $, formatDate, getErrorMessage, getFileIconSvg, extractFileName, getFil
 /** @typedef {{ key: string; isFolder: boolean }} SelectionItem */
 
 const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+const NAME_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 
 class FileExplorer {
   /** @type {R2Client} */
@@ -409,12 +410,12 @@ class FileExplorer {
     const { true: folders = [], false: files = [] } = Object.groupBy(items, (i) => String(i.isFolder))
 
     /** @type {(a: FileItem, b: FileItem) => number} */
-    const byName = (a, b) => extractFileName(a.key).localeCompare(extractFileName(b.key))
+    const byName = (a, b) => NAME_COLLATOR.compare(extractFileName(a.key), extractFileName(b.key))
 
     /** @type {Record<string, (a: FileItem, b: FileItem) => number>} */
     const comparators = {
       name: byName,
-      date: (a, b) => new Date(a.lastModified ?? 0).getTime() - new Date(b.lastModified ?? 0).getTime(),
+      date: (a, b) => (Date.parse(a.lastModified ?? '') || 0) - (Date.parse(b.lastModified ?? '') || 0),
       size: (a, b) => (a.size ?? 0) - (b.size ?? 0),
     }
 

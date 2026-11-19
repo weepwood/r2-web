@@ -146,3 +146,26 @@ test('drag-and-drop traverses folders recursively and preserves relative folder 
   assert.match(upload, /key = currentPrefix \+ relDir \+ processedName/)
   assert.match(upload, /if \(uploads\.some\(\(u\) => u\.key\.slice\(currentPrefix\.length\)\.includes\('\/'\)\)\)/)
 })
+
+test('FileExplorer uses natural numeric collator and Date.parse for sorting performance', () => {
+  const explorer = read('src/js/file-explorer.js')
+  assert.match(explorer, /const NAME_COLLATOR = new Intl\.Collator\(undefined, \{ numeric: true, sensitivity: 'base' \}\)/)
+  assert.match(explorer, /NAME_COLLATOR\.compare\(extractFileName\(a\.key\), extractFileName\(b\.key\)\)/)
+  assert.match(explorer, /Date\.parse\(a\.lastModified \?\? ''\)/)
+})
+
+test('version metadata stays synchronized across package.json, constants.js, and index.html', () => {
+  const pkg = JSON.parse(read('package.json'))
+  const constants = read('src/js/constants.js')
+  const html = read('src/index.html')
+  assert.match(constants, new RegExp(`export const VERSION = '${pkg.version.replace(/\./g, '\\.')}'`))
+  assert.match(html, new RegExp(`id="about-version">v${pkg.version.replace(/\./g, '\\.')}<`))
+})
+
+test('quiet-ui polish preserves containment, modal backdrop blur, and clean scrollbars', () => {
+  const quiet = read('src/css/quiet-ui.css')
+  assert.match(quiet, /scrollbar-width:\s*thin/)
+  assert.match(quiet, /dialog::backdrop/)
+  assert.match(quiet, /#app \.file-card\s*\{[\s\S]*?contain:\s*layout style/)
+  assert.match(quiet, /#app \.bucket-switcher-select/)
+})
