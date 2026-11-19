@@ -654,8 +654,8 @@ class App {
         input.type = shown ? 'text' : 'password'
         btn.setAttribute('aria-pressed', String(shown))
         btn.setAttribute('aria-label', t(shown ? 'hidePassword' : 'showPassword'))
-        const eye = /** @type {HTMLElement | null} */ (btn.querySelector('.eye-icon'))
-        const eyeOff = /** @type {HTMLElement | null} */ (btn.querySelector('.eye-off-icon'))
+        const eye = /** @type {HTMLElement | null} */ (btn.querySelector('.icon-eye'))
+        const eyeOff = /** @type {HTMLElement | null} */ (btn.querySelector('.icon-eye-off'))
         if (eye) eye.hidden = shown
         if (eyeOff) eyeOff.hidden = !shown
       }

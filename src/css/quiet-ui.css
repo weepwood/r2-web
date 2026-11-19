@@ -104,6 +104,26 @@
   color: var(--text-tertiary);
   font-size: 11px;
 }
+#app .file-browser[data-view='gallery'] .file-card[data-is-folder='true'] {
+  gap: 10px;
+  padding: 9px 11px;
+  background: var(--bg-primary);
+  border-color: var(--border-subtle);
+  border-radius: 12px;
+}
+#app .file-browser[data-view='gallery'] .file-card[data-is-folder='true']:hover {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+#app .file-browser[data-view='gallery'] .file-card[data-is-folder='true'].selected {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+}
+#app .file-browser[data-view='gallery'] .file-card[data-is-folder='true'] .file-card-icon {
+  border-radius: 9px;
+}
+#app .file-browser[data-view='gallery'] .file-card[data-is-folder='true'] .file-card-name {
+  padding: 0;
+}
 #app .file-browser[data-view='gallery'] .file-card-actions { top: 11px; right: 11px; }
 #app .file-browser[data-view='gallery'] .file-card-actions .icon-btn {
   border-color: color-mix(in srgb, var(--border) 40%, transparent);

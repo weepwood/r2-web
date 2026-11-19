@@ -90,3 +90,17 @@ test('preview, upload drag-drop, paste hint and mobile styles avoid layout glitc
   assert.doesNotMatch(switchCss, /calc\(50% - 132px\)/)
   assert.match(wallCss, /max-width: calc\(100vw - 125px\)/)
 })
+
+test('dropdown selects, secret toggle icons, folder card bounds and detail fixes stay aligned', () => {
+  assert.match(appJs, /querySelector\('\.icon-eye'\)/)
+  assert.match(appJs, /querySelector\('\.icon-eye-off'\)/)
+  assert.doesNotMatch(appJs, /querySelector\('\.eye(?:-off)?-icon'\)/)
+  assert.match(html, /class="icon icon-eye-off"[^>]*\bhidden\b/)
+  assert.match(refinementsCss, /dialog \.field \.secret-input-wrap input\s*\{[^}]*padding-right:\s*40px/)
+  assert.match(refinementsCss, /dialog \.field select,\s*#app \.bucket-switcher-select\s*\{[^}]*appearance:\s*none/)
+  assert.match(refinementsCss, /dialog \.field select option,\s*#app \.bucket-switcher-select option/)
+  assert.match(refinementsCss, /\[data-view='grid'\] \.file-card\[data-is-folder='true'\]/)
+  assert.match(refinementsCss, /\[data-view='gallery'\] \.file-card\[data-is-folder='true'\]/)
+  assert.match(refinementsCss, /#preview-dialog #preview-body img[\s\S]*width:\s*auto;\s*height:\s*auto;/)
+  assert.doesNotMatch(html, /id="view-(?:gallery|wall)-btn"[^>]*\btitle=/)
+})
