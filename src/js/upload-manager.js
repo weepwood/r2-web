@@ -1,7 +1,3 @@
-import { encode as encodeJpeg } from '@jsquash/jpeg'
-import { optimise as optimisePng } from '@jsquash/oxipng'
-import { encode as encodeWebp } from '@jsquash/webp'
-import { encode as encodeAvif } from '@jsquash/avif'
 import dayjs from 'dayjs'
 import { filesize } from 'filesize'
 import { COMPRESSIBLE_IMAGE_RE, IMAGE_RE, MAX_UPLOAD_SIZE } from './constants.js'
@@ -13,6 +9,48 @@ import { UIManager } from './ui-manager.js'
 import { $, applyFilenameTemplate, computeFileHash, extractFileName, getMimeType } from './utils.js'
 
 /** @typedef {{ accountId?: string; accessKeyId?: string; secretAccessKey?: string; bucket?: string; filenameTpl?: string; filenameTplScope?: string; customDomain?: string; compressMode?: string; compressLevel?: string; tinifyKey?: string }} AppConfig */
+
+/**
+ * Decode an image File into an offscreen Canvas element.
+ * @param {File} file
+ * @returns {Promise<HTMLCanvasElement | null>}
+ */
+async function decodeImageToCanvas(file) {
+  const img = new Image()
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  const objectUrl = URL.createObjectURL(file)
+  try {
+    await new Promise((resolve, reject) => {
+      img.onload = resolve
+      img.onerror = reject
+      img.src = objectUrl
+    })
+    const width = img.naturalWidth || img.width
+    const height = img.naturalHeight || img.height
+    if (!width || !height) return null
+    canvas.width = width
+    canvas.height = height
+    ctx.drawImage(img, 0, 0)
+    return canvas
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+/**
+ * Native browser canvas fallback encoder when WASM codecs fail or cannot load.
+ * @param {HTMLCanvasElement} canvas
+ * @param {string} mimeType
+ * @param {number} [quality]
+ * @returns {Promise<Blob | null>}
+ */
+function encodeWithCanvas(canvas, mimeType, quality) {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), mimeType, quality)
+  })
+}
 
 /**
  * Compress image file based on configuration
@@ -40,57 +78,85 @@ async function compressFile(file, config, onStatus) {
       const avifQuality = level === 'extreme' ? 50 : 60
 
       const ext = file.name.toLowerCase().match(/\.(jpe?g|png|webp|avif)$/i)?.[1]
-      let compressedBuffer
+      /** @type {Blob | null} */
+      let compressedBlob = null
       let outputType = file.type
 
       if (ext === 'png') {
-        const oxipngLevel = level === 'extreme' ? 4 : 2
-        compressedBuffer = await optimisePng(await file.arrayBuffer(), {
-          level: oxipngLevel,
-          interlace: false,
-          optimiseAlpha: true,
-        })
         outputType = 'image/png'
+        try {
+          const { optimise: optimisePng } = await import('@jsquash/oxipng')
+          const oxipngLevel = level === 'extreme' ? 4 : 2
+          const compressedBuffer = await optimisePng(await file.arrayBuffer(), {
+            level: oxipngLevel,
+            interlace: false,
+            optimiseAlpha: true,
+          })
+          if (compressedBuffer && compressedBuffer.byteLength > 0) {
+            compressedBlob = new Blob([compressedBuffer], { type: outputType })
+          }
+        } catch {
+          const canvas = await decodeImageToCanvas(file)
+          if (canvas) compressedBlob = await encodeWithCanvas(canvas, outputType)
+        }
       } else {
-        const img = new Image()
-        const canvas = document.createElement('canvas')
+        const canvas = await decodeImageToCanvas(file)
+        if (!canvas) return file
         const ctx = canvas.getContext('2d')
         if (!ctx) return file
-        const objectUrl = URL.createObjectURL(file)
-        try {
-          await new Promise((resolve, reject) => {
-            img.onload = resolve
-            img.onerror = reject
-            img.src = objectUrl
-          })
-
-          canvas.width = img.width
-          canvas.height = img.height
-          ctx.drawImage(img, 0, 0)
-        } finally {
-          URL.revokeObjectURL(objectUrl)
-        }
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
 
+        /** @type {BufferSource | null} */
+        let compressedBuffer = null
+        let fallbackQuality = jpegQuality / 100
+
         if (ext === 'jpg' || ext === 'jpeg') {
-          compressedBuffer = await encodeJpeg(imageData, { quality: jpegQuality })
           outputType = 'image/jpeg'
+          try {
+            const { encode: encodeJpeg } = await import('@jsquash/jpeg')
+            compressedBuffer = await encodeJpeg(imageData, { quality: jpegQuality })
+          } catch {
+            compressedBuffer = null
+          }
         } else if (ext === 'webp') {
-          compressedBuffer = await encodeWebp(imageData, { quality: jpegQuality })
           outputType = 'image/webp'
+          try {
+            const { encode: encodeWebp } = await import('@jsquash/webp')
+            compressedBuffer = await encodeWebp(imageData, { quality: jpegQuality })
+          } catch {
+            compressedBuffer = null
+          }
         } else if (ext === 'avif') {
-          const avifSpeed = level === 'extreme' ? 4 : 6
-          compressedBuffer = await encodeAvif(imageData, {
-            quality: avifQuality,
-            speed: avifSpeed,
-          })
           outputType = 'image/avif'
+          fallbackQuality = avifQuality / 100
+          try {
+            const { encode: encodeAvif } = await import('@jsquash/avif')
+            const avifSpeed = level === 'extreme' ? 4 : 6
+            compressedBuffer = await encodeAvif(imageData, {
+              quality: avifQuality,
+              speed: avifSpeed,
+            })
+          } catch {
+            compressedBuffer = null
+          }
         } else {
           return file
         }
+
+        if (compressedBuffer && compressedBuffer.byteLength > 0) {
+          compressedBlob = new Blob([compressedBuffer], { type: outputType })
+        } else {
+          const canvasBlob = await encodeWithCanvas(canvas, outputType, fallbackQuality)
+          if (canvasBlob && canvasBlob.type === outputType && canvasBlob.size > 0) {
+            compressedBlob = canvasBlob
+          }
+        }
       }
 
-      const compressedBlob = new Blob([compressedBuffer], { type: outputType })
+      if (!compressedBlob || compressedBlob.size === 0) {
+        onStatus && onStatus('压缩失败，使用原图')
+        return file
+      }
 
       const savings = Math.round((1 - compressedBlob.size / originalSize) * 100)
 
@@ -183,6 +249,8 @@ class UploadManager {
   #config
   #dragCounter = 0
   #panelBatchGeneration = 0
+  /** @type {WeakMap<File, string>} */
+  #droppedRelativePaths = new WeakMap()
 
   /** @param {R2Client} r2 @param {UIManager} ui @param {FileExplorer} explorer @param {ConfigManager} config */
   constructor(r2, ui, explorer, config) {
@@ -190,6 +258,71 @@ class UploadManager {
     this.#ui = ui
     this.#explorer = explorer
     this.#config = config
+  }
+
+  /**
+   * Read all entries from a FileSystemDirectoryEntry (Chromium batches at 100 entries per call).
+   * @param {any} dirEntry
+   * @returns {Promise<any[]>}
+   */
+  #readDirectoryEntries(dirEntry) {
+    return new Promise((resolve, reject) => {
+      const reader = dirEntry.createReader()
+      /** @type {any[]} */
+      const all = []
+      const readNext = () => {
+        reader.readEntries(
+          (/** @type {any[]} */ batch) => {
+            if (batch.length === 0) {
+              resolve(all)
+              return
+            }
+            all.push(...batch)
+            readNext()
+          },
+          reject,
+        )
+      }
+      readNext()
+    })
+  }
+
+  /**
+   * Recursively collect files (preserving relative folder paths) and empty directories.
+   * @param {any[]} entries
+   * @returns {Promise<{ files: File[]; emptyDirs: string[] }>}
+   */
+  async #collectDroppedEntries(entries) {
+    /** @type {File[]} */
+    const files = []
+    /** @type {string[]} */
+    const emptyDirs = []
+
+    /** @param {any} entry */
+    const walk = async (entry) => {
+      if (!entry) return
+      if (entry.isFile) {
+        const file = await new Promise((resolve, reject) => entry.file(resolve, reject))
+        const relPath = String(entry.fullPath || file.webkitRelativePath || file.name).replace(/^\/+/, '')
+        this.#droppedRelativePaths.set(file, relPath)
+        files.push(file)
+      } else if (entry.isDirectory) {
+        const children = await this.#readDirectoryEntries(entry)
+        if (children.length === 0) {
+          const dirPath = String(entry.fullPath || entry.name).replace(/^\/+/, '').replace(/\/+$/, '')
+          if (dirPath) emptyDirs.push(dirPath + '/')
+          return
+        }
+        for (const child of children) {
+          await walk(child)
+        }
+      }
+    }
+
+    for (const entry of entries) {
+      await walk(entry)
+    }
+    return { files, emptyDirs }
   }
 
   initDragDrop() {
@@ -212,7 +345,7 @@ class UploadManager {
       }
     }
 
-    const handleDrop = (/** @type {DragEvent} */ e) => {
+    const handleDrop = async (/** @type {DragEvent} */ e) => {
       if (!hasFiles(e)) {
         this.#dragCounter = 0
         dropzone.hidden = true
@@ -222,9 +355,38 @@ class UploadManager {
       e.stopPropagation()
       this.#dragCounter = 0
       dropzone.hidden = true
-      const files = [...(e.dataTransfer?.files ?? [])]
-      if (files.length > 0) {
-        this.uploadFiles(files)
+
+      // Snapshot DataTransfer items/entries synchronously before any await clears them.
+      const items = [...(e.dataTransfer?.items ?? [])]
+      const entries = items
+        .map((item) => (typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null))
+        .filter(Boolean)
+      const fallbackFiles = [...(e.dataTransfer?.files ?? [])]
+
+      if (entries.length > 0) {
+        try {
+          const { files, emptyDirs } = await this.#collectDroppedEntries(entries)
+          const basePrefix = this.#explorer.currentPrefix
+          for (const dir of emptyDirs) {
+            await this.#r2.createFolder(basePrefix + dir)
+          }
+          if (files.length > 0) {
+            await this.uploadFiles(files)
+          } else if (emptyDirs.length > 0) {
+            this.#explorer.invalidateCache()
+            await this.#explorer.refresh()
+          } else {
+            this.#ui.toast(t('dropInvalidHint'), 'info')
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          this.#ui.toast(t('networkError', { msg }), 'error')
+        }
+        return
+      }
+
+      if (fallbackFiles.length > 0) {
+        await this.uploadFiles(fallbackFiles)
       } else {
         this.#ui.toast(t('dropInvalidHint'), 'info')
       }
@@ -409,7 +571,11 @@ class UploadManager {
       }
 
       const shouldApplyTpl = filenameTplScope === 'all' ? true : IMAGE_RE.test(file.name)
-      const processedName = shouldApplyTpl ? await applyFilenameTemplate(filenameTpl, file) : file.name
+      const processedName = (shouldApplyTpl ? await applyFilenameTemplate(filenameTpl, file) : file.name).replace(/^\/+/, '')
+      const rawRelativePath = (this.#droppedRelativePaths.get(file) || file.webkitRelativePath || '').replace(/^\/+/, '')
+      const relDir = rawRelativePath.includes('/')
+        ? rawRelativePath.slice(0, rawRelativePath.lastIndexOf('/') + 1)
+        : ''
 
       if (
         !pathStrategyChosen &&
@@ -428,13 +594,13 @@ class UploadManager {
 
       let key
       if (useOverrideKey) {
-        key = /** @type {string} */ (overrideKey)
+        key = /** @type {string} */ (overrideKey).replace(/^\/+/, '')
       } else if (pathStrategy === 'template') {
         key = processedName
       } else if (pathStrategy === 'prefix-basename') {
-        key = currentPrefix + extractFileName(processedName)
+        key = currentPrefix + relDir + extractFileName(processedName)
       } else {
-        key = currentPrefix + processedName
+        key = currentPrefix + relDir + processedName
       }
 
       // Check for existing file conflict
@@ -517,7 +683,7 @@ class UploadManager {
         })
         u.updateStatus(t('uploading'))
         try {
-          const result = await this.#uploadSingleFile(u.id, u.key, compressed, u.contentType)
+          const result = await this.#uploadSingleFile(u.id, u.key, compressed, compressed.type || u.contentType)
           u.updateStatus(compressionStatus || filesize(compressed.size))
           return result
         } catch (e) {
@@ -554,6 +720,9 @@ class UploadManager {
       this.#ui.toast(t('uploadSkipped', { count: skippedCount }), 'info')
     }
 
+    if (uploads.some((u) => u.key.slice(currentPrefix.length).includes('/'))) {
+      this.#explorer.invalidateCache()
+    }
     await this.#explorer.refresh()
   }
 
