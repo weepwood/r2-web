@@ -192,6 +192,15 @@ dialog .btn {
   justify-content: center;
 }
 
+#app .btn.sm,
+#hero .btn.sm,
+dialog .btn.sm {
+  min-height: 33px;
+  padding: 5px 11px;
+  border-radius: 9px;
+  font-size: var(--text-sm);
+}
+
 #app .btn.secondary,
 #hero .btn.secondary,
 dialog .btn.secondary {
@@ -262,6 +271,7 @@ dialog .btn:active {
   --fb-pad: 14px;
   --fb-icon: 58px;
   --fb-name: var(--text-sm);
+  gap: 16px;
   min-width: 0;
   min-height: 0;
   padding: clamp(18px, 2.5vw, 36px);
@@ -294,7 +304,7 @@ dialog .btn:active {
 #app .file-card {
   justify-content: flex-start;
   gap: 11px;
-  min-height: 172px;
+  min-height: 138px;
   padding: var(--fb-pad);
   border: 1px solid var(--border-subtle);
   border-radius: 16px;
@@ -305,6 +315,25 @@ dialog .btn:active {
     background var(--duration-normal) var(--ease-out),
     box-shadow var(--duration-normal) var(--ease-out),
     transform var(--duration-normal) var(--ease-out);
+}
+
+#app [data-view='grid'] .file-card[data-is-folder='true'],
+#app [data-view='grid'] .file-card:not(:has(.file-card-thumb-wrap)) {
+  justify-content: center;
+  align-self: start;
+  min-height: 108px;
+}
+
+#app [data-view='grid'] .file-card[data-is-folder='true'] {
+  min-height: 98px;
+  gap: 9px;
+}
+
+#app [data-view='grid'] .file-card-icon.folder {
+  width: calc(var(--fb-icon) * 0.82);
+  height: calc(var(--fb-icon) * 0.82);
+  min-width: calc(var(--fb-icon) * 0.82);
+  border-radius: 13px;
 }
 
 #app .file-card:hover {
@@ -439,7 +468,7 @@ dialog .btn:active {
 }
 
 #app .skeleton-card {
-  min-height: 172px;
+  min-height: 138px;
   background: var(--bg-primary);
   border: 1px solid var(--border-subtle);
   border-radius: 16px;
@@ -451,12 +480,12 @@ dialog .btn:active {
 }
 
 #app .empty-state {
-  max-width: 560px;
+  max-width: 520px;
   width: 100%;
-  min-height: min(48vh, 380px);
+  min-height: 240px;
   align-self: center;
   margin: auto;
-  padding: 36px 28px;
+  padding: 28px 24px;
   border: 1px dashed var(--border);
   border-radius: 20px;
   background: var(--bg-primary);
@@ -547,9 +576,56 @@ dialog .field input,
 dialog .field select {
   min-height: 39px;
   padding: 8px 12px;
-  border-color: var(--border);
+  border: 1px solid var(--border);
   border-radius: 9px;
-  background: var(--bg-primary);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+dialog .field .secret-input-wrap input {
+  padding-right: 40px;
+}
+
+dialog .field .secret-toggle-btn {
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  color: var(--text-tertiary);
+}
+
+dialog .field .secret-toggle-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+dialog .field select,
+#app .bucket-switcher-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  line-height: 1.35;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2378869a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px 14px;
+}
+
+dialog .field select option,
+#app .bucket-switcher-select option {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+dialog .bucket-control-row select,
+dialog .bucket-control-row .btn.sm {
+  height: 36px;
+  min-height: 36px;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 dialog .field input:hover,
@@ -559,7 +635,22 @@ dialog .field select:hover {
 
 dialog .field input:focus,
 dialog .field select:focus {
+  outline: none;
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+dialog .field input[aria-invalid='true'] {
+  border-color: var(--text-danger);
+}
+
+dialog .field input[aria-invalid='true']:focus {
+  border-color: var(--text-danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-danger) 18%, transparent);
+}
+
+#share-dialog .share-divider .share-divider-text {
+  background: var(--bg-primary);
 }
 
 #config-form > .dialog-body {
@@ -611,7 +702,7 @@ dialog .field select:focus {
   min-width: 0;
   height: min(52dvh, 480px);
   margin-top: 0;
-  padding: 4px 8px 12px 2px;
+  padding: 6px 10px 16px 6px;
 }
 
 #config-form .config-section {
@@ -724,9 +815,13 @@ dialog .field select:focus {
     padding: 9px 11px;
   }
 
+  #config-form .config-tab-btn[aria-selected='true']::before {
+    display: none;
+  }
+
   #config-form .config-tab-panels {
     height: min(46dvh, 380px);
-    padding: 3px 3px 12px;
+    padding: 5px 5px 14px;
   }
 }
 
@@ -782,9 +877,12 @@ dialog .field select:focus {
   }
 
   #app .file-card,
-  #app [data-view='grid'] .file-card {
+  #app [data-view='grid'] .file-card,
+  #app [data-view='grid'] .file-card[data-is-folder='true'],
+  #app [data-view='grid'] .file-card:not(:has(.file-card-thumb-wrap)) {
     flex-direction: row;
     justify-content: flex-start;
+    align-self: stretch;
     min-height: 66px;
     gap: 12px;
     padding: 10px 12px;
@@ -798,7 +896,8 @@ dialog .field select:focus {
   }
 
   #app .file-card-icon,
-  #app [data-view='grid'] .file-card-icon {
+  #app [data-view='grid'] .file-card-icon,
+  #app [data-view='grid'] .file-card-icon.folder {
     width: 42px;
     height: 42px;
     min-width: 42px;
@@ -902,11 +1001,19 @@ dialog .field select:focus {
 
 /* Density settings should change the physical card size, not only the grid count. */
 #app .file-browser[data-density='compact'] .file-card {
-  min-height: 142px;
+  min-height: 116px;
 }
 
 #app .file-browser[data-density='loose'] .file-card {
-  min-height: 196px;
+  min-height: 156px;
+}
+
+#app .file-browser[data-view='grid'][data-density='compact'] .file-card[data-is-folder='true'] {
+  min-height: 84px;
+}
+
+#app .file-browser[data-view='grid'][data-density='loose'] .file-card[data-is-folder='true'] {
+  min-height: 112px;
 }
 
 #app .file-browser[data-view='list'] .file-card {
@@ -937,7 +1044,9 @@ dialog .field select:focus {
   }
 
   #app .file-browser[data-density='compact'] .file-card,
-  #app .file-browser[data-density='loose'] .file-card {
+  #app .file-browser[data-density='loose'] .file-card,
+  #app .file-browser[data-view='grid'][data-density='compact'] .file-card[data-is-folder='true'],
+  #app .file-browser[data-view='grid'][data-density='loose'] .file-card[data-is-folder='true'] {
     min-height: 66px;
   }
 }
@@ -1196,8 +1305,11 @@ dialog .field select:focus {
 
 #preview-dialog #preview-body img,
 #preview-dialog #preview-body video {
+  width: auto;
+  height: auto;
   max-width: 100%;
   max-height: 100%;
+  margin: auto;
   object-fit: contain;
   border-radius: 10px;
   box-shadow: 0 6px 30px rgb(0 0 0 / 7%);
@@ -1740,6 +1852,55 @@ dialog .field select:focus {
   background: var(--accent-subtle);
 }
 
+#app .file-browser[data-view='gallery'] .file-card[data-is-folder='true'] {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-height: 54px;
+  padding: 9px 11px;
+  align-self: start;
+}
+
+#app .file-browser[data-view='gallery'] .file-card[data-is-folder='true'] .file-card-icon.folder {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  max-height: 38px;
+  border: 0;
+  border-radius: 9px;
+}
+
+#app .file-browser[data-view='gallery'] .file-card[data-is-folder='true'] .file-card-icon.folder svg {
+  width: 20px;
+  height: 20px;
+}
+
+#app .file-browser[data-view='gallery'] .file-card[data-is-folder='true'] .file-card-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
+#app .file-browser[data-view='gallery'] .file-card[data-is-folder='true'] .file-card-actions {
+  position: static;
+  margin-left: auto;
+}
+
+#app .file-browser[data-view='gallery'] .file-card[data-is-folder='true'] .file-card-checkbox-wrap {
+  position: static;
+  width: 0;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+#app.batch-mode .file-browser[data-view='gallery'] .file-card[data-is-folder='true'] .file-card-checkbox-wrap,
+#app .file-browser[data-view='gallery'] .file-card[data-is-folder='true'].selected .file-card-checkbox-wrap {
+  width: 18px;
+}
+
 #app .file-browser[data-view='gallery'] .file-card-icon svg {
   width: 44px;
   height: 44px;
@@ -2066,6 +2227,32 @@ dialog .field select:focus {
     max-height: 135px;
     aspect-ratio: auto;
     border-radius: 8px;
+  }
+
+  #app .file-browser[data-view='gallery'] .file-card[data-is-folder='true'] {
+    flex-direction: row;
+    min-height: 52px;
+    padding: 8px 10px;
+    gap: 9px;
+  }
+
+  #app .file-browser[data-view='gallery'] .file-card[data-is-folder='true'] .file-card-icon.folder {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    max-height: 36px;
+    border-radius: 8px;
+  }
+
+  #app .file-browser[data-view='gallery'] .file-card[data-is-folder='true'] .file-card-name {
+    padding: 0;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+  }
+
+  #app .file-browser[data-view='gallery'] .file-card[data-is-folder='true'] .file-card-actions {
+    position: static;
   }
 
   #app .file-browser[data-view='gallery'] .file-card-name {

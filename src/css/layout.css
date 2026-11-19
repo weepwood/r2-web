@@ -92,7 +92,7 @@
     }
 
     @media (320px <= width <= 640px) {
-      grid-template-columns: 2fr;
+      grid-template-columns: minmax(0, 1fr);
     }
 
     @media (width <= 320px) {

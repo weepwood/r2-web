@@ -137,7 +137,9 @@
 
     & .secret-toggle-btn {
       position: absolute;
+      top: 50%;
       right: 6px;
+      transform: translateY(-50%);
       width: 28px;
       height: 28px;
       color: var(--text-tertiary);
@@ -1142,13 +1144,14 @@
     position: fixed;
     inset: unset;
     margin: 0;
-    background: color-mix(in oklch, var(--bg-primary) 85%, transparent);
+    background: color-mix(in oklch, var(--bg-primary) 94%, transparent);
     backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
+    box-shadow: 0 12px 32px rgb(0 0 0 / 16%);
     padding: var(--sp-1);
-    min-width: 160px;
+    min-width: 168px;
     overflow: visible;
     opacity: 1;
     transform: scale(1);
@@ -1783,6 +1786,8 @@
   .about-links {
     display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: var(--sp-2);
 
     @media (width <= 480px) {
@@ -1914,11 +1919,12 @@
       appearance: none;
       width: 18px;
       height: 18px;
-      border: 1.5px solid color-mix(in oklch, var(--text-secondary) 50%, transparent);
-      border-radius: 4px;
+      border: 1.5px solid color-mix(in oklch, var(--text-secondary) 55%, transparent);
+      border-radius: 5px;
+      background-color: color-mix(in oklch, var(--bg-primary) 90%, transparent);
       cursor: pointer;
       flex-shrink: 0;
-      transition: border-color var(--duration-fast) var(--ease-out);
+      transition: border-color var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out);
 
       &:checked {
         background: var(--accent)
@@ -1930,9 +1936,11 @@
   }
 
   @media (hover: hover) and (pointer: fine) {
-    .file-card:hover .file-card-checkbox-wrap,
-    .file-card:focus-within .file-card-checkbox-wrap {
-      opacity: 0.88;
+    .file-browser:not([data-view='list']) .file-card:not([data-is-folder='true']):hover .file-card-checkbox-wrap,
+    .file-browser:not([data-view='list']) .file-card:not([data-is-folder='true']):focus-within .file-card-checkbox-wrap,
+    .file-browser[data-view='grid'] .file-card[data-is-folder='true']:hover .file-card-checkbox-wrap,
+    .file-browser[data-view='grid'] .file-card[data-is-folder='true']:focus-within .file-card-checkbox-wrap {
+      opacity: 0.92;
     }
   }
 
