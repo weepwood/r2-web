@@ -488,6 +488,7 @@ class FileOperations {
     try {
       const url = this.#r2.getPublicUrl(key) ?? (await this.#r2.getPresignedUrl(key))
       const res = await fetch(url)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const blob = await res.blob()
       const item = new ClipboardItem({ [blob.type || 'image/png']: blob })
       await navigator.clipboard.write([item])

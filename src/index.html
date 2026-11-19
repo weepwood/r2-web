@@ -178,7 +178,19 @@
                     <label for="cfg-secret-key" id="lbl-secret-key"> 秘密访问密钥（Secret Access Key） </label>
                     <button type="button" class="help-icon" id="help-secret-key">?</button>
                   </div>
-                  <input id="cfg-secret-key" name="secretAccessKey" type="password" required autocomplete="off" />
+                  <div class="secret-input-wrap">
+                    <input id="cfg-secret-key" name="secretAccessKey" type="password" required autocomplete="off" />
+                    <button type="button" class="icon-btn sm secret-toggle-btn" id="toggle-secret-key" aria-pressed="false" aria-label="显示密钥">
+                      <svg class="icon icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                      <svg class="icon icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                        <line x1="1" y1="1" x2="23" y2="23" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
                 <div class="field">
                   <div class="field-label">
@@ -306,13 +318,25 @@
                       <label for="cfg-tinify-key" id="lbl-tinify-key">Tinify API Key</label>
                       <button type="button" class="help-icon" id="help-tinify-key">?</button>
                     </div>
-                    <input
-                      id="cfg-tinify-key"
-                      name="tinifyKey"
-                      type="password"
-                      autocomplete="off"
-                      placeholder="来自 tinify.com 的 Key"
-                    />
+                    <div class="secret-input-wrap">
+                      <input
+                        id="cfg-tinify-key"
+                        name="tinifyKey"
+                        type="password"
+                        autocomplete="off"
+                        placeholder="来自 tinify.com 的 Key"
+                      />
+                      <button type="button" class="icon-btn sm secret-toggle-btn" id="toggle-tinify-key" aria-pressed="false" aria-label="显示密钥">
+                        <svg class="icon icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                        <svg class="icon icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                          <line x1="1" y1="1" x2="23" y2="23" />
+                        </svg>
+                      </button>
+                    </div>
                     <small class="field-hint">
                       <span id="tinify-key-hint-text">还没有 API Key？</span>
                       <a
@@ -1278,7 +1302,7 @@
     </dialog>
 
     <!-- Context Menu -->
-    <div class="context-menu" id="context-menu" popover="manual">
+    <div class="context-menu" id="context-menu" popover="manual" role="menu">
       <button type="button" class="context-menu-item" data-action="preview">
         <svg
           class="icon"
@@ -1329,7 +1353,7 @@
         </svg>
         <span>二维码</span>
       </button>
-      <div class="context-menu-item has-submenu" id="ctx-copy-link">
+      <div class="context-menu-item has-submenu" id="ctx-copy-link" role="menuitem" tabindex="0" aria-haspopup="menu" aria-expanded="false">
         <svg
           class="icon"
           viewBox="0 0 24 24"

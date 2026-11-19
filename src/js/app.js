@@ -49,6 +49,8 @@ class App {
   #wall
   #appEventsBound = false
   #batchMode = false
+  /** @type {string | null} */
+  #lastSelectedKey = null
   /** @type {((e: TransitionEvent) => void) | null} */
   #onBarTransitionEnd = null
 
@@ -346,6 +348,16 @@ class App {
     $('#batch-delete-text').textContent = t('delete')
     $('#batch-toggle-text').textContent = t(this.#batchMode ? 'exitBatchMode' : 'batchMode')
 
+    const syncSecretBtnLabel = (btnId, inputId) => {
+      const btn = document.querySelector(btnId)
+      const input = /** @type {HTMLInputElement | null} */ (document.querySelector(inputId))
+      if (!btn || !input) return
+      const shown = input.type === 'text'
+      btn.setAttribute('aria-label', t(shown ? 'hidePassword' : 'showPassword'))
+    }
+    syncSecretBtnLabel('#toggle-secret-key', '#cfg-secret-key')
+    syncSecretBtnLabel('#toggle-tinify-key', '#cfg-tinify-key')
+
     $('#batch-cancel-btn').setAttribute('aria-label', t('cancel'))
     document.querySelectorAll('button.icon-btn[data-tooltip]').forEach((button) => {
       const label = /** @type {HTMLElement} */ (button).dataset.tooltip
@@ -385,6 +397,7 @@ class App {
       this.#updateThumbnailModeIndicator()
       this.#explorer = new FileExplorer(this.#r2, this.#ui)
       this.#explorer.setOnDirectoryChange(() => {
+        this.#lastSelectedKey = null
         this.#details.close()
         this.#wall.close()
       })
@@ -397,8 +410,12 @@ class App {
       $('#app').hidden = false
       this.#restoreViewPrefs()
       this.#explorer.setOnSelectionChange((count) => {
+        if (count > 0 && !this.#batchMode) {
+          this.#enterBatchMode()
+        }
         if (!this.#batchMode) return
         $('#batch-count').textContent = t('batchSelected', { count })
+        this.#updateBatchActionButtons(count)
         this.#updateSelectAllBtn()
       })
       if (!this.#appEventsBound) {
@@ -429,6 +446,7 @@ class App {
   }
 
   #enterBatchMode() {
+    if (this.#batchMode) return
     this.#batchMode = true
     const app = /** @type {HTMLElement} */ ($('#app'))
     app.classList.add('batch-mode')
@@ -442,12 +460,15 @@ class App {
     }
     bar.classList.remove('hiding')
     bar.hidden = false
-    $('#batch-count').textContent = t('batchSelected', { count: 0 })
+    const count = this.#explorer?.getSelection().length ?? 0
+    $('#batch-count').textContent = t('batchSelected', { count })
+    this.#updateBatchActionButtons(count)
     this.#updateSelectAllBtn()
   }
 
   #exitBatchMode() {
     this.#batchMode = false
+    this.#lastSelectedKey = null
     const explorer = /** @type {FileExplorer} */ (this.#explorer)
     explorer.clearSelection()
     const app = /** @type {HTMLElement} */ ($('#app'))
@@ -465,6 +486,21 @@ class App {
       bar.classList.remove('hiding')
     }
     bar.addEventListener('transitionend', this.#onBarTransitionEnd)
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      bar.removeEventListener('transitionend', this.#onBarTransitionEnd)
+      this.#onBarTransitionEnd = null
+      bar.hidden = true
+      bar.classList.remove('hiding')
+    }
+  }
+
+  /** @param {number} count */
+  #updateBatchActionButtons(count) {
+    const empty = count === 0
+    for (const id of ['#batch-move-btn', '#batch-copy-btn', '#batch-delete-btn']) {
+      const btn = /** @type {HTMLButtonElement} */ ($(id))
+      btn.disabled = empty
+    }
   }
 
   #updateSelectAllBtn() {
@@ -611,6 +647,30 @@ class App {
     const tinifyKeyInput = /** @type {HTMLInputElement} */ ($('#cfg-tinify-key'))
     const uploadConcurrencyInput = /** @type {HTMLSelectElement} */ ($('#cfg-upload-concurrency'))
 
+    const setupSecretToggle = (btnId, input) => {
+      const btn = /** @type {HTMLButtonElement | null} */ (document.querySelector(btnId))
+      if (!btn || !input) return
+      const setShown = (shown) => {
+        input.type = shown ? 'text' : 'password'
+        btn.setAttribute('aria-pressed', String(shown))
+        btn.setAttribute('aria-label', t(shown ? 'hidePassword' : 'showPassword'))
+        const eye = /** @type {HTMLElement | null} */ (btn.querySelector('.eye-icon'))
+        const eyeOff = /** @type {HTMLElement | null} */ (btn.querySelector('.eye-off-icon'))
+        if (eye) eye.hidden = shown
+        if (eyeOff) eyeOff.hidden = !shown
+      }
+      setShown(false)
+      btn.onclick = () => setShown(input.type === 'password')
+    }
+    setupSecretToggle('#toggle-secret-key', secretInput)
+    setupSecretToggle('#toggle-tinify-key', tinifyKeyInput)
+
+    const requiredInputs = [accountInput, accessInput, secretInput, bucketInput]
+    for (const input of requiredInputs) {
+      input.removeAttribute('aria-invalid')
+      input.oninput = () => input.removeAttribute('aria-invalid')
+    }
+
     const currentTheme = localStorage.getItem(THEME_KEY) || 'auto'
     const savedLang = getCurrentLang()
     const currentDensityValue = localStorage.getItem(DENSITY_KEY) || 'normal'
@@ -667,6 +727,17 @@ class App {
     )
 
     $('#config-submit').onclick = async () => {
+      const missing = requiredInputs.filter((input) => !input.value.trim())
+      if (missing.length > 0) {
+        switchTab('r2')
+        for (const input of missing) {
+          input.setAttribute('aria-invalid', 'true')
+        }
+        missing[0].focus()
+        this.#ui.toast(t('configRequiredFields'), 'error')
+        return
+      }
+
       const newTheme = themeInput ? themeInput.value : 'auto'
       if (newTheme !== currentTheme) {
         this.#ui.setTheme(newTheme)
@@ -707,7 +778,11 @@ class App {
 
     dialog.querySelectorAll('form.config-tab-panel').forEach((form) => {
       const formElement = /** @type {HTMLFormElement} */ (form)
-      formElement.onsubmit = (/** @type {Event} */ e) => e.preventDefault()
+      formElement.onsubmit = (/** @type {Event} */ e) => {
+        e.preventDefault()
+        if (document.activeElement instanceof Element && document.activeElement.closest('#bucket-settings-manager')) return
+        $('#config-submit').click()
+      }
     })
 
     dialog.showModal()
@@ -742,9 +817,32 @@ class App {
       }
     })
 
+    window.addEventListener(
+      'scroll',
+      (e) => {
+        if (e.target instanceof Element && e.target.closest('#context-menu')) return
+        if ($('#context-menu').matches(':popover-open')) {
+          this.#ui.hideContextMenu(true)
+        }
+      },
+      { passive: true, capture: true },
+    )
+
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
-        this.#ui.hideContextMenu()
+        const menu = $('#context-menu')
+        if (menu.matches(':popover-open')) {
+          this.#ui.hideContextMenu()
+          return
+        }
+        if (
+          this.#batchMode &&
+          !document.querySelector('dialog[open]') &&
+          $('#details-panel').hidden &&
+          !this.#wall.isOpen
+        ) {
+          this.#exitBatchMode()
+        }
       }
     })
   }
@@ -797,7 +895,7 @@ class App {
     })
     document.addEventListener('keydown', (e) => {
       if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || !this.#config.isValid()) return
-      if (document.querySelector('dialog[open]')) return
+      if (this.#wall.isOpen || document.querySelector('dialog[open]')) return
       if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select, [contenteditable="true"]')) return
       e.preventDefault()
       filterInput.focus()
@@ -806,8 +904,15 @@ class App {
     $('#refresh-btn').addEventListener('click', async () => {
       const btn = /** @type {HTMLElement} */ ($('#refresh-btn'))
       btn.classList.add('refreshing')
-      btn.addEventListener('animationend', () => btn.classList.remove('refreshing'), { once: true })
-      await this.#explorer.refresh()
+      const clearRefreshing = () => btn.classList.remove('refreshing')
+      btn.addEventListener('animationend', clearRefreshing, { once: true })
+      const timer = setTimeout(clearRefreshing, 700)
+      try {
+        await this.#explorer.refresh()
+      } finally {
+        clearTimeout(timer)
+        clearRefreshing()
+      }
     })
 
     $('#breadcrumb').addEventListener('click', (e) => {
@@ -842,31 +947,118 @@ class App {
       if (checkboxWrap) {
         e.stopPropagation()
         const card = /** @type {HTMLElement | null} */ (checkboxWrap.closest('.file-card'))
-        if (card) /** @type {FileExplorer} */ (this.#explorer).toggleSelect(card.dataset.key ?? '', card.dataset.isFolder === 'true')
+        if (card) {
+          const key = card.dataset.key ?? ''
+          const explorer = /** @type {FileExplorer} */ (this.#explorer)
+          if (e.shiftKey && this.#lastSelectedKey) {
+            explorer.selectRange(this.#lastSelectedKey, key)
+          } else {
+            explorer.toggleSelect(key, card.dataset.isFolder === 'true')
+          }
+          this.#lastSelectedKey = key
+        }
         return
       }
 
       const card = /** @type {HTMLElement | null} */ (target.closest('.file-card'))
       if (card) {
-        if (this.#batchMode) {
-          /** @type {FileExplorer} */ (this.#explorer).toggleSelect(card.dataset.key ?? '', card.dataset.isFolder === 'true')
+        const key = card.dataset.key ?? ''
+        const isFolder = card.dataset.isFolder === 'true'
+        const explorer = /** @type {FileExplorer} */ (this.#explorer)
+        if (e.shiftKey && this.#lastSelectedKey) {
+          explorer.selectRange(this.#lastSelectedKey, key)
+          this.#lastSelectedKey = key
           return
         }
-        if (e.ctrlKey || e.metaKey) {
-          /** @type {FileExplorer} */ (this.#explorer).toggleSelect(card.dataset.key ?? '', card.dataset.isFolder === 'true')
+        if (this.#batchMode || e.ctrlKey || e.metaKey) {
+          explorer.toggleSelect(key, isFolder)
+          this.#lastSelectedKey = key
           return
         }
-        /** @type {FileExplorer} */ (this.#explorer).clearSelection()
-        if (card.dataset.isFolder === 'true') {
-          /** @type {FileExplorer} */ this.#explorer.navigate(card.dataset.key ?? '')
+        explorer.clearSelection()
+        this.#lastSelectedKey = null
+        if (isFolder) {
+          explorer.navigate(key)
         } else {
           this.#openPreview({
-            key: card.dataset.key ?? '',
+            key,
             size: Number(card.dataset.size ?? 0),
             lastModified: Number(card.dataset.mod ?? 0),
           })
         }
       }
+    })
+
+    $('#file-grid').addEventListener('keydown', (e) => {
+      const card = /** @type {HTMLElement | null} */ (
+        e.target instanceof Element ? e.target.closest('.file-card') : null
+      )
+      if (!card || e.target !== card) return
+
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        const key = card.dataset.key ?? ''
+        const isFolder = card.dataset.isFolder === 'true'
+        const explorer = /** @type {FileExplorer} */ (this.#explorer)
+        if (this.#batchMode || e.key === ' ' || e.ctrlKey || e.metaKey) {
+          if (e.shiftKey && this.#lastSelectedKey) {
+            explorer.selectRange(this.#lastSelectedKey, key)
+          } else {
+            explorer.toggleSelect(key, isFolder)
+          }
+          this.#lastSelectedKey = key
+        } else if (isFolder) {
+          explorer.navigate(key)
+        } else {
+          this.#openPreview({
+            key,
+            size: Number(card.dataset.size ?? 0),
+            lastModified: Number(card.dataset.mod ?? 0),
+          })
+        }
+        return
+      }
+
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return
+      const visibleCards = /** @type {HTMLElement[]} */ ([
+        ...document.querySelectorAll('#file-grid .file-card:not([hidden])'),
+      ])
+      const idx = visibleCards.indexOf(card)
+      if (idx < 0 || visibleCards.length <= 1) return
+
+      e.preventDefault()
+      let nextIdx = idx
+      if (e.key === 'ArrowRight') {
+        nextIdx = Math.min(visibleCards.length - 1, idx + 1)
+      } else if (e.key === 'ArrowLeft') {
+        nextIdx = Math.max(0, idx - 1)
+      } else {
+        const curRect = card.getBoundingClientRect()
+        const curCenter = curRect.left + curRect.width / 2
+        const dir = e.key === 'ArrowDown' ? 1 : -1
+        const candidates = visibleCards.filter((candidate) => {
+          const rect = candidate.getBoundingClientRect()
+          return dir > 0 ? rect.top >= curRect.bottom - 2 : rect.bottom <= curRect.top + 2
+        })
+        if (candidates.length > 0) {
+          const targetRowY = dir > 0
+            ? Math.min(...candidates.map((c) => c.getBoundingClientRect().top))
+            : Math.max(...candidates.map((c) => c.getBoundingClientRect().top))
+          const rowCards = candidates.filter((c) => Math.abs(c.getBoundingClientRect().top - targetRowY) < 8)
+          let best = rowCards[0]
+          let bestDist = Infinity
+          for (const candidate of rowCards) {
+            const rect = candidate.getBoundingClientRect()
+            const dist = Math.abs(rect.left + rect.width / 2 - curCenter)
+            if (dist < bestDist) {
+              bestDist = dist
+              best = candidate
+            }
+          }
+          nextIdx = visibleCards.indexOf(best)
+        }
+      }
+      visibleCards[nextIdx]?.focus()
     })
 
     $('#file-grid').addEventListener('contextmenu', (e) => {
@@ -881,6 +1073,15 @@ class App {
     })
 
     $('#context-menu').addEventListener('click', (e) => {
+      const trigger = /** @type {HTMLElement | null} */ (
+        /** @type {HTMLElement} */ (e.target).closest('#ctx-copy-link')
+      )
+      if (trigger && !(/** @type {HTMLElement} */ (e.target).closest('.context-submenu'))) {
+        const open = trigger.classList.toggle('is-open')
+        trigger.setAttribute('aria-expanded', String(open))
+        return
+      }
+
       const item = /** @type {HTMLElement | null} */ (
         /** @type {HTMLElement} */ (e.target).closest('.context-menu-item')
       )
@@ -942,6 +1143,71 @@ class App {
         case 'delete':
           /** @type {FileOperations} */ this.#ops.delete(key, isFolder)
           break
+      }
+    })
+
+    $('#context-menu').addEventListener('keydown', (e) => {
+      const menu = $('#context-menu')
+      const sub = /** @type {HTMLElement | null} */ (e.target instanceof Element ? e.target.closest('.context-submenu') : null)
+      const copyTrigger = /** @type {HTMLElement | null} */ ($('#ctx-copy-link', menu))
+      const getVisibleTopItems = () =>
+        /** @type {HTMLElement[]} */ ([...menu.children].filter(
+          (el) => el instanceof HTMLElement && !el.hidden && (el.classList.contains('context-menu-item') || el.id === 'ctx-copy-link'),
+        ))
+      const getVisibleSubItems = () =>
+        /** @type {HTMLElement[]} */ ([...menu.querySelectorAll('.context-submenu .context-menu-item')].filter(
+          (el) => el instanceof HTMLElement && !el.hidden,
+        ))
+
+      if (sub) {
+        const subItems = getVisibleSubItems()
+        const idx = subItems.indexOf(/** @type {HTMLElement} */ (e.target))
+        if (e.key === 'ArrowDown') {
+          e.preventDefault()
+          subItems[(idx + 1) % subItems.length]?.focus()
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault()
+          subItems[(idx - 1 + subItems.length) % subItems.length]?.focus()
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault()
+          copyTrigger?.classList.remove('is-open')
+          copyTrigger?.setAttribute('aria-expanded', 'false')
+          copyTrigger?.focus()
+        } else if (e.key === 'Home') {
+          e.preventDefault()
+          subItems[0]?.focus()
+        } else if (e.key === 'End') {
+          e.preventDefault()
+          subItems.at(-1)?.focus()
+        }
+        return
+      }
+
+      const items = getVisibleTopItems()
+      if (!items.length) return
+      const idx = items.indexOf(/** @type {HTMLElement} */ (e.target))
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        items[(idx + 1) % items.length]?.focus()
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        items[(idx - 1 + items.length) % items.length]?.focus()
+      } else if (e.key === 'Home') {
+        e.preventDefault()
+        items[0]?.focus()
+      } else if (e.key === 'End') {
+        e.preventDefault()
+        items.at(-1)?.focus()
+      } else if (e.key === 'ArrowRight' && e.target === copyTrigger) {
+        e.preventDefault()
+        copyTrigger.classList.add('is-open')
+        copyTrigger.setAttribute('aria-expanded', 'true')
+        getVisibleSubItems()[0]?.focus()
+      } else if ((e.key === 'Enter' || e.key === ' ') && e.target === copyTrigger) {
+        e.preventDefault()
+        const open = copyTrigger.classList.toggle('is-open')
+        copyTrigger.setAttribute('aria-expanded', String(open))
+        if (open) getVisibleSubItems()[0]?.focus()
       }
     })
 

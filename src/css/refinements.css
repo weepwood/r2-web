@@ -330,6 +330,11 @@ dialog .btn:active {
   outline-offset: -2px;
 }
 
+#app .file-card.is-inspecting {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-primary));
+}
+
 #app .file-card-icon {
   display: grid;
   place-items: center;
@@ -349,10 +354,15 @@ dialog .btn:active {
   background: var(--accent-subtle);
 }
 
-#app .file-card-thumb {
-  max-width: 100%;
+#app .file-card-thumb-wrap {
+  width: 100%;
   border: 1px solid var(--border-subtle);
   border-radius: 11px;
+}
+
+#app .file-card-thumb {
+  width: 100%;
+  height: 100%;
 }
 
 #app .file-card-name {
@@ -412,10 +422,15 @@ dialog .btn:active {
   border-radius: 11px;
 }
 
-#app [data-view='list'] .file-card-thumb {
+#app [data-view='list'] .file-card-thumb-wrap {
   width: 42px;
   height: 42px;
   flex-shrink: 0;
+}
+
+#app [data-view='list'] .file-card-thumb {
+  width: 100%;
+  height: 100%;
 }
 
 #app [data-view='list'] .file-card-name {
@@ -468,14 +483,12 @@ dialog .btn:active {
 }
 
 #app .paste-hint {
-  bottom: 22px;
-  padding: 9px 13px;
+  margin-top: auto;
+  padding: 8px 13px;
   background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
   border: 1px solid var(--border);
   border-radius: 999px;
   box-shadow: var(--surface-shadow);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
 }
 
 #app .upload-panel {
@@ -792,7 +805,7 @@ dialog .field select:focus {
     border-radius: 11px;
   }
 
-  #app [data-view='grid'] .file-card-thumb {
+  #app [data-view='grid'] .file-card-thumb-wrap {
     width: 42px;
     height: 42px;
     aspect-ratio: 1;
@@ -848,8 +861,19 @@ dialog .field select:focus {
   }
 
   #hero .hero-features {
-    grid-template-columns: repeat(2, minmax(0, max-content));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     column-gap: 10px;
+  }
+
+  #hero .hero-feature {
+    justify-content: center;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 380px) {
+  #hero .hero-features {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1162,6 +1186,7 @@ dialog .field select:focus {
 }
 
 #preview-dialog #preview-body {
+  position: relative;
   flex: 1 1 100%;
   min-width: 0;
   min-height: 0;
@@ -1176,6 +1201,26 @@ dialog .field select:focus {
   object-fit: contain;
   border-radius: 10px;
   box-shadow: 0 6px 30px rgb(0 0 0 / 7%);
+}
+
+#preview-dialog #preview-body img.is-loading {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#preview-dialog #preview-body img.is-zoomable {
+  cursor: zoom-in;
+}
+
+#preview-dialog #preview-body img.is-zoomed {
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+  cursor: zoom-out;
 }
 
 #preview-dialog #preview-body pre {
@@ -1581,25 +1626,18 @@ dialog .field select:focus {
   opacity: 0.6;
 }
 
-#app .file-card.thumbnail-unavailable::after,
-#app .file-card.thumbnail-error::after {
+#app .file-card.thumbnail-unavailable .file-card-thumb-wrap::after,
+#app .file-card.thumbnail-error .file-card-thumb-wrap::after {
   content: '';
   position: absolute;
+  inset: 0;
+  margin: auto;
   width: 21px;
   height: 21px;
-  left: 50%;
-  top: 26%;
-  transform: translate(-50%, -50%);
   pointer-events: none;
   color: var(--text-tertiary);
   background: currentColor;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.6'%3E%3Crect x='3' y='3' width='18' height='18' rx='3'/%3E%3Cpath d='m3 17 5-5 4 4 3-3 6 6'/%3E%3Ccircle cx='16.5' cy='7.5' r='1.3'/%3E%3C/svg%3E") center / contain no-repeat;
-}
-
-#app .file-browser[data-view='list'] .file-card.thumbnail-unavailable::after,
-#app .file-browser[data-view='list'] .file-card.thumbnail-error::after {
-  top: 50%;
-  left: 36px;
 }
 
 @media (max-width: 900px) {
@@ -1612,12 +1650,6 @@ dialog .field select:focus {
   #app .thumbnail-mode-indicator {
     font-size: 11px;
     margin-left: 4px;
-  }
-
-  #app .file-card.thumbnail-unavailable::after,
-  #app .file-card.thumbnail-error::after {
-    top: 50%;
-    left: 33px;
   }
 }
 
@@ -1676,16 +1708,21 @@ dialog .field select:focus {
   box-shadow: var(--surface-shadow);
 }
 
-#app .file-browser[data-view='gallery'] .file-card-thumb {
+#app .file-browser[data-view='gallery'] .file-card-thumb-wrap {
   width: 100%;
   height: clamp(148px, 17vw, 210px);
   min-height: 148px;
   max-height: 210px;
   aspect-ratio: auto;
-  object-fit: cover;
   border: 0;
   border-radius: 11px;
   flex-shrink: 0;
+}
+
+#app .file-browser[data-view='gallery'] .file-card-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 #app .file-browser[data-view='gallery'] .file-card-icon {
@@ -2021,7 +2058,7 @@ dialog .field select:focus {
     border-radius: 12px;
   }
 
-  #app .file-browser[data-view='gallery'] .file-card-thumb,
+  #app .file-browser[data-view='gallery'] .file-card-thumb-wrap,
   #app .file-browser[data-view='gallery'] .file-card-icon {
     width: 100%;
     height: 135px;

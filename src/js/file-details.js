@@ -11,6 +11,10 @@ import { $, extractFileName, formatDate, getFileIconSvg, getMimeType } from './u
 class FileDetails {
   /** @type {DetailsItem | null} */
   #item = null
+  /** @type {HTMLElement | null} */
+  #activeCard = null
+  /** @type {HTMLElement | null} */
+  #opener = null
   /** @type {(item: {key:string,size:number,lastModified:number}) => void} */
   #onPreview
   /** @type {(key:string) => void} */
@@ -31,8 +35,8 @@ class FileDetails {
     this.#onDownload = callbacks.onDownload
     this.#onCopy = callbacks.onCopy
 
-    $('#details-close').addEventListener('click', () => this.close())
-    $('#details-backdrop').addEventListener('click', () => this.close())
+    $('#details-close').addEventListener('click', () => this.close(true))
+    $('#details-backdrop').addEventListener('click', () => this.close(true))
     $('#details-open').addEventListener('click', () => {
       const item = this.#item
       if (!item) return
@@ -52,12 +56,16 @@ class FileDetails {
     document.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape' || this.#item === null) return
       if (document.querySelector('dialog[open]')) return
-      this.close()
+      this.close(true)
     })
   }
 
   /** @param {HTMLElement} card */
   open(card) {
+    this.#activeCard?.classList.remove('is-inspecting')
+    this.#activeCard = card
+    this.#activeCard.classList.add('is-inspecting')
+    this.#opener = document.activeElement instanceof HTMLElement ? document.activeElement : card
     this.#item = {
       key: card.dataset.key ?? '',
       isFolder: card.dataset.isFolder === 'true',
@@ -73,12 +81,20 @@ class FileDetails {
     $('#details-close').focus()
   }
 
-  close() {
+  /** @param {boolean} [restoreFocus] */
+  close(restoreFocus = false) {
     if (!this.#item) return
     this.#item = null
+    this.#activeCard?.classList.remove('is-inspecting')
+    this.#activeCard = null
+    const opener = this.#opener
+    this.#opener = null
     $('#details-panel').hidden = true
     $('#details-backdrop').hidden = true
     $('#app').classList.remove('details-open')
+    if (restoreFocus && opener?.isConnected) {
+      opener.focus({ preventScroll: true })
+    }
   }
 
   updateLabels() {

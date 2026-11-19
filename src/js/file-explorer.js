@@ -173,6 +173,33 @@ class FileExplorer {
     this.#onSelectionChange?.(this.#selection.size)
   }
 
+  /**
+   * Select all visible cards between two keys (inclusive).
+   * @param {string} fromKey
+   * @param {string} toKey
+   */
+  selectRange(fromKey, toKey) {
+    const cards = [.../** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('#file-grid .file-card:not([hidden])'))]
+    const fromIdx = cards.findIndex((card) => card.dataset.key === fromKey)
+    const toIdx = cards.findIndex((card) => card.dataset.key === toKey)
+    if (fromIdx < 0 || toIdx < 0) {
+      const target = cards.find((card) => card.dataset.key === toKey)
+      if (target) this.toggleSelect(toKey, target.dataset.isFolder === 'true')
+      return
+    }
+    const [start, end] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx]
+    for (let i = start; i <= end; i++) {
+      const card = cards[i]
+      const key = card.dataset.key ?? ''
+      const isFolder = card.dataset.isFolder === 'true'
+      this.#selection.set(key, { key, isFolder })
+      card.classList.add('selected')
+      const cb = /** @type {HTMLInputElement|null} */ (card.querySelector('.file-card-checkbox-wrap input'))
+      if (cb) cb.checked = true
+    }
+    this.#onSelectionChange?.(this.#selection.size)
+  }
+
   selectAll() {
     const cards = /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll('#file-grid .file-card:not([hidden])'))
     cards.forEach((card) => {
@@ -416,6 +443,7 @@ class FileExplorer {
   #createFileCard(item) {
     const card = document.createElement('div')
     card.className = 'file-card'
+    card.tabIndex = 0
     card.dataset.key = item.key
     card.dataset.isFolder = String(item.isFolder)
     card.dataset.filetype = item.isFolder ? 'folder' : getFileType(item.key)
@@ -435,7 +463,7 @@ class FileExplorer {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
       </div>`
     } else if (isImage) {
-      iconHtml = `<img class="file-card-thumb" alt="" loading="lazy" decoding="async">`
+      iconHtml = `<div class="file-card-thumb-wrap"><img class="file-card-thumb" alt="" loading="lazy" decoding="async" draggable="false"></div>`
     } else {
       const fileType = getFileType(item.key)
       iconHtml = `<div class="file-card-icon ${fileType}">
@@ -444,6 +472,7 @@ class FileExplorer {
     }
 
     const checkboxLabel = t('selectFile')
+    const moreLabel = t('moreActions')
     card.innerHTML = `
       <span class="file-card-checkbox-wrap" title="${checkboxLabel}">
         <input type="checkbox" aria-label="${checkboxLabel}">
@@ -465,8 +494,8 @@ class FileExplorer {
             <path d="M12 11v5M12 8h.01" />
           </svg>
         </button>
-        <button type="button" class="icon-btn sm file-card-menu" title="More">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+        <button type="button" class="icon-btn sm file-card-menu" title="${moreLabel}" aria-label="${moreLabel}">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
         </button>
       </div>
     `
@@ -599,6 +628,9 @@ class FileExplorer {
         ol.appendChild(li)
       }
     }
+    const lastBtn = ol.querySelector('li:last-child .breadcrumb-btn')
+    if (lastBtn) lastBtn.setAttribute('aria-current', 'page')
+    ol.scrollLeft = ol.scrollWidth
   }
 
   async refresh() {

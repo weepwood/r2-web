@@ -2,6 +2,7 @@ import { ConfigManager } from './config-manager.js'
 import { FileOperations } from './file-operations.js'
 import { UploadManager } from './upload-manager.js'
 import { R2Client } from './r2-client.js'
+import { UIManager } from './ui-manager.js'
 import { getCurrentLang } from './i18n.js'
 
 const PATCHED = Symbol('smooth-bucket-switch-patched')
@@ -19,6 +20,7 @@ const messages = {
     busy: '当前有上传、复制、移动或删除任务，请在任务完成后切换 Bucket。',
     failed: 'Bucket 切换失败：{message}',
     removed: 'Bucket 配置已删除',
+    removeTitle: '删除当前 Bucket',
     confirmDelete: '只删除浏览器中的本地配置，不会删除 Cloudflare R2 中的真实 Bucket。确认继续？',
     lastBucket: '至少需要保留一个 Bucket',
     duplicate: '该 Bucket 已存在',
@@ -35,6 +37,7 @@ const messages = {
     busy: '目前有上傳、複製、移動或刪除工作，請在工作完成後切換 Bucket。',
     failed: 'Bucket 切換失敗：{message}',
     removed: 'Bucket 設定已刪除',
+    removeTitle: '刪除目前 Bucket',
     confirmDelete: '只刪除瀏覽器中的本機設定，不會刪除 Cloudflare R2 中的真實 Bucket。確定繼續？',
     lastBucket: '至少需要保留一個 Bucket',
     duplicate: '此 Bucket 已存在',
@@ -51,6 +54,7 @@ const messages = {
     busy: 'An upload, copy, move, or delete task is still running. Switch buckets after it finishes.',
     failed: 'Bucket switch failed: {message}',
     removed: 'Bucket configuration removed',
+    removeTitle: 'Remove current bucket',
     confirmDelete: 'This only removes the local browser configuration. It will not delete the real R2 bucket. Continue?',
     lastBucket: 'Keep at least one bucket',
     duplicate: 'This bucket already exists',
@@ -67,6 +71,7 @@ const messages = {
     busy: 'アップロード、コピー、移動、削除の処理中です。完了後に Bucket を切り替えてください。',
     failed: 'Bucket の切り替えに失敗しました：{message}',
     removed: 'Bucket 設定を削除しました',
+    removeTitle: '現在の Bucket を削除',
     confirmDelete: 'ブラウザ内の設定のみ削除し、Cloudflare R2 の実 Bucket は削除しません。続行しますか？',
     lastBucket: '少なくとも 1 つの Bucket を残してください',
     duplicate: 'この Bucket は既に存在します',
@@ -343,7 +348,8 @@ async function handleRemoveBucket() {
     showFeedback(message('busy'), true)
     return
   }
-  if (!window.confirm(message('confirmDelete'))) return
+  const confirmed = await new UIManager().confirm(message('removeTitle'), message('confirmDelete'))
+  if (!confirmed) return
 
   const fallback = profile.buckets.find((bucket) => bucket.id !== active.id)
   if (!fallback) return
