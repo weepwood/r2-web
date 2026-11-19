@@ -300,6 +300,11 @@ const I18N = {
     editContentTypeInvalid: '格式不正确，示例：image/jpeg',
     editingContentType: '正在修改 "{name}" 的 Content-Type...',
     editContentTypeSuccess: '已将 "{name}" 的 Content-Type 修改为 {type}',
+    moreActions: '更多操作',
+    uploadFailed: '上传失败',
+    showPassword: '显示密钥',
+    hidePassword: '隐藏密钥',
+    configRequiredFields: '请填写完整的 R2 连接配置',
   },
   zh_TW: {
     appTitle: 'R2 Web',
@@ -600,6 +605,11 @@ const I18N = {
     editContentTypeInvalid: '格式不正確，範例：image/jpeg',
     editingContentType: '正在修改「{name}」的 Content-Type…',
     editContentTypeSuccess: '已將「{name}」的 Content-Type 修改為 {type}',
+    moreActions: '更多操作',
+    uploadFailed: '上傳失敗',
+    showPassword: '顯示金鑰',
+    hidePassword: '隱藏金鑰',
+    configRequiredFields: '請填寫完整的 R2 連線設定',
   },
   en: {
     appTitle: 'R2 Web',
@@ -904,6 +914,11 @@ const I18N = {
     editContentTypeInvalid: 'Invalid format, e.g. image/jpeg',
     editingContentType: 'Updating Content-Type for "{name}"...',
     editContentTypeSuccess: 'Content-Type of "{name}" updated to {type}',
+    moreActions: 'More actions',
+    uploadFailed: 'Upload failed',
+    showPassword: 'Show key',
+    hidePassword: 'Hide key',
+    configRequiredFields: 'Please complete the required R2 connection fields',
   },
   ja: {
     appTitle: 'R2 Web',
@@ -1211,6 +1226,11 @@ const I18N = {
     editContentTypeInvalid: '形式が正しくありません（例: image/jpeg）',
     editingContentType: '"{name}" の Content-Type を更新しています...',
     editContentTypeSuccess: '"{name}" の Content-Type を {type} に更新しました',
+    moreActions: 'その他の操作',
+    uploadFailed: 'アップロード失敗',
+    showPassword: 'キーを表示',
+    hidePassword: 'キーを隠す',
+    configRequiredFields: '必須の R2 接続設定を入力してください',
   },
 }
 

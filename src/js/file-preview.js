@@ -71,12 +71,20 @@ class FilePreview {
     const index = this.#navigationItems.findIndex((item) => item.key === this.#currentKey)
     const hasList = this.#navigationItems.length > 1 && index >= 0
 
+    const activeElement = document.activeElement
     previous.hidden = !hasList
     next.hidden = !hasList
     position.hidden = !hasList
     previous.disabled = !hasList || index === 0
     next.disabled = !hasList || index === this.#navigationItems.length - 1
     if (hasList) position.textContent = `${index + 1} / ${this.#navigationItems.length}`
+    if (activeElement === previous && previous.disabled) {
+      if (!next.disabled) next.focus({ preventScroll: true })
+      else $('#preview-dialog .dialog-panel').focus({ preventScroll: true })
+    } else if (activeElement === next && next.disabled) {
+      if (!previous.disabled) previous.focus({ preventScroll: true })
+      else $('#preview-dialog .dialog-panel').focus({ preventScroll: true })
+    }
   }
 
   /** @param {string} message @param {'loading'|'error'|'empty'} kind */
@@ -158,8 +166,32 @@ class FilePreview {
         if (IMAGE_RE.test(key)) {
           const img = document.createElement('img')
           img.alt = extractFileName(key)
+          img.classList.add('is-loading')
+          const spinner = document.createElement('p')
+          spinner.className = 'preview-message preview-message-loading preview-image-spinner'
+          spinner.setAttribute('role', 'status')
+          spinner.textContent = t('previewLoading')
+          img.onload = () => {
+            if (!isCurrent()) return
+            img.classList.remove('is-loading')
+            spinner.remove()
+            if (img.naturalWidth && img.naturalHeight) {
+              const dim = document.createElement('span')
+              dim.textContent = `${img.naturalWidth} × ${img.naturalHeight}`
+              footer.appendChild(dim)
+              if (img.naturalWidth > body.clientWidth || img.naturalHeight > body.clientHeight) {
+                img.classList.add('is-zoomable')
+                img.addEventListener('click', () => img.classList.toggle('is-zoomed'))
+              }
+            }
+          }
+          img.onerror = () => {
+            if (!isCurrent()) return
+            copyImageBtn.hidden = true
+            this.#showMessage(t('previewLoadFailed'), 'error')
+          }
           img.src = url
-          body.replaceChildren(img)
+          body.replaceChildren(spinner, img)
           copyImageBtn.hidden = false
         } else if (VIDEO_RE.test(key)) {
           const video = document.createElement('video')
@@ -232,7 +264,9 @@ class FilePreview {
     }
     try {
       const res = await fetch(this.#currentUrl)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const blob = await res.blob()
+      const objectUrl = URL.createObjectURL(blob)
       const pngBlob = await new Promise((resolve, reject) => {
         const img = new Image()
         img.onload = () => {
@@ -241,10 +275,13 @@ class FilePreview {
           canvas.height = img.naturalHeight
           canvas.getContext('2d').drawImage(img, 0, 0)
           canvas.toBlob((b) => (b ? resolve(b) : reject(new Error())), 'image/png')
-          URL.revokeObjectURL(img.src)
+          URL.revokeObjectURL(objectUrl)
         }
-        img.onerror = reject
-        img.src = URL.createObjectURL(blob)
+        img.onerror = () => {
+          URL.revokeObjectURL(objectUrl)
+          reject(new Error('Image decode failed'))
+        }
+        img.src = objectUrl
       })
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })])
       this.#ui.toast(t('copyImageSuccess'), 'success')

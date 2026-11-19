@@ -386,8 +386,12 @@ class PosterWall {
     const focusActions = /** @type {HTMLElement} */ (document.querySelector('#wall-focus-actions'))
     const emptyState = /** @type {HTMLElement} */ (document.querySelector('#wall-empty'))
     const moreControl = /** @type {HTMLElement} */ (document.querySelector('#wall-more'))
-    const actionsVisible = this.#activeKey ? this.#positionFocusActions(focusActions) : false
-    focusActions.hidden = !actionsVisible
+    if (this.#activeKey) {
+      focusActions.hidden = false
+      if (!this.#positionFocusActions(focusActions)) focusActions.hidden = true
+    } else {
+      focusActions.hidden = true
+    }
     emptyState.hidden = this.#layout.length > 0
     moreControl.hidden = !this.#hasMore
     this.#updateHud()

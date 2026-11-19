@@ -22,13 +22,14 @@ body[data-bucket-switching] {
   content: attr(data-bucket-label);
   position: sticky;
   top: 50%;
-  left: 50%;
+  left: 0;
+  right: 0;
   z-index: 6;
   display: block;
   width: max-content;
   max-width: min(320px, calc(100vw - 48px));
-  margin: -36px auto 0;
-  padding: var(--sp-2) var(--sp-3) var(--sp-2) calc(var(--sp-3) + 18px);
+  margin: 10px auto 0;
+  padding: var(--sp-2) var(--sp-4);
   overflow: hidden;
   color: var(--text-primary);
   font-size: var(--text-sm);
@@ -46,12 +47,14 @@ body[data-bucket-switching] {
 #file-browser[data-bucket-switching]::before {
   content: '';
   position: sticky;
-  top: calc(50% - 20px);
-  left: calc(50% - 132px);
+  top: calc(50% - 28px);
+  left: 0;
+  right: 0;
   z-index: 7;
   display: block;
-  width: 12px;
-  height: 12px;
+  width: 18px;
+  height: 18px;
+  margin: 0 auto;
   border: 2px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
@@ -128,10 +131,6 @@ body[data-bucket-switching] .bucket-switcher::after {
 }
 
 @media (max-width: 640px) {
-  #file-browser[data-bucket-switching]::before {
-    left: calc(50% - 110px);
-  }
-
   .bucket-switch-feedback {
     bottom: var(--sp-3);
   }

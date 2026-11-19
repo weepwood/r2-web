@@ -58,6 +58,7 @@
   box-shadow: 0 3px 12px rgb(0 0 0 / 5%);
 }
 #app .file-card:active { transform: none; }
+#app .file-card-thumb-wrap { border-color: transparent; }
 #app .file-card-thumb { border-color: transparent; }
 #app .file-card-actions .icon-btn {
   box-shadow: none;
@@ -85,6 +86,7 @@
   background: var(--accent-subtle);
   border-color: var(--accent);
 }
+#app .file-browser[data-view='gallery'] .file-card-thumb-wrap,
 #app .file-browser[data-view='gallery'] .file-card-thumb,
 #app .file-browser[data-view='gallery'] .file-card-icon {
   border-radius: 5px;

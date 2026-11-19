@@ -4,6 +4,16 @@ import { t } from './i18n.js'
 import { $, extractFileName } from './utils.js'
 
 class UIManager {
+  /** @param {() => void} apply */
+  #applyThemeChange(apply) {
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (document.startViewTransition && !reduceMotion) {
+      document.startViewTransition(apply)
+    } else {
+      apply()
+    }
+  }
+
   initTheme() {
     const saved = localStorage.getItem(THEME_KEY) || 'auto'
 
@@ -16,14 +26,9 @@ class UIManager {
 
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
       if (localStorage.getItem(THEME_KEY) === 'auto') {
-        const apply = () => {
+        this.#applyThemeChange(() => {
           document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light')
-        }
-        if (document.startViewTransition) {
-          document.startViewTransition(apply)
-        } else {
-          apply()
-        }
+        })
       }
     })
   }
@@ -31,15 +36,10 @@ class UIManager {
   toggleTheme() {
     const current = document.documentElement.getAttribute('data-theme')
     const next = current === 'dark' ? 'light' : 'dark'
-    const apply = () => {
+    this.#applyThemeChange(() => {
       document.documentElement.setAttribute('data-theme', next)
       localStorage.setItem(THEME_KEY, next)
-    }
-    if (document.startViewTransition) {
-      document.startViewTransition(apply)
-    } else {
-      apply()
-    }
+    })
   }
 
   /** @param {string} theme - 'light' | 'dark' | 'auto' */
@@ -54,15 +54,9 @@ class UIManager {
       localStorage.setItem(THEME_KEY, theme)
     }
 
-    const apply = () => {
+    this.#applyThemeChange(() => {
       document.documentElement.setAttribute('data-theme', effectiveTheme)
-    }
-
-    if (document.startViewTransition) {
-      document.startViewTransition(apply)
-    } else {
-      apply()
-    }
+    })
   }
 
   /** @param {string} message @param {'info' | 'success' | 'error'} [type] */
@@ -91,6 +85,10 @@ class UIManager {
       container = $('#toast-container')
     }
 
+    while (container.children.length >= 4) {
+      container.firstElementChild?.remove()
+    }
+
     const el = document.createElement('div')
     el.className = `toast ${type}`
     const iconSpan = document.createElement('span')
@@ -101,17 +99,26 @@ class UIManager {
     el.appendChild(iconSpan)
     el.appendChild(msgSpan)
 
-    container.appendChild(el)
-    const duration = message.length > 80 ? TOAST_DURATION * 2 : TOAST_DURATION
-    setTimeout(() => {
+    let dismissed = false
+    const dismiss = () => {
+      if (dismissed || !el.isConnected) return
+      dismissed = true
+      clearTimeout(timer)
       el.classList.add('removing')
-      el.addEventListener('animationend', () => {
+      const cleanup = () => {
         el.remove()
         if (container.classList.contains('toast-container-dialog') && !container.children.length) {
           container.remove()
         }
-      })
-    }, duration)
+      }
+      el.addEventListener('animationend', cleanup, { once: true })
+      setTimeout(cleanup, 300)
+    }
+
+    el.addEventListener('click', dismiss)
+    container.appendChild(el)
+    const duration = message.length > 80 ? TOAST_DURATION * 2 : TOAST_DURATION
+    const timer = setTimeout(dismiss, duration)
   }
 
   showSkeleton() {
@@ -155,6 +162,10 @@ class UIManager {
   /** @param {number} x @param {number} y @param {string} key @param {boolean} isFolder @param {{size?: number, mod?: number}} [meta] */
   showContextMenu(x, y, key, isFolder, meta = {}) {
     const menu = $('#context-menu')
+    if (menu.matches(':popover-open')) {
+      this.hideContextMenu(true)
+    }
+
     menu.dataset.key = key
     menu.dataset.isFolder = String(isFolder)
     if (meta.size !== undefined) menu.dataset.size = String(meta.size)
@@ -174,6 +185,8 @@ class UIManager {
     downloadBtn.hidden = isFolder
     shareQrBtn.hidden = isFolder
     copyLinkBtn.hidden = isFolder
+    copyLinkBtn.classList.remove('is-open')
+    copyLinkBtn.setAttribute('aria-expanded', 'false')
     const isImage = !isFolder && IMAGE_RE.test(key)
     const isVideo = !isFolder && VIDEO_RE.test(key)
     const isAudio = !isFolder && AUDIO_RE.test(key)
@@ -191,18 +204,28 @@ class UIManager {
     const rect = menu.getBoundingClientRect()
     const vw = window.innerWidth
     const vh = window.innerHeight
-    if (rect.right > vw) menu.style.left = vw - rect.width - 8 + 'px'
-    if (rect.bottom > vh) menu.style.top = vh - rect.height - 8 + 'px'
+    const clampedLeft = Math.max(8, Math.min(rect.left, vw - rect.width - 8))
+    const clampedTop = Math.max(8, Math.min(rect.top, vh - rect.height - 8))
+    menu.style.left = clampedLeft + 'px'
+    menu.style.top = clampedTop + 'px'
 
+    const updatedRect = menu.getBoundingClientRect()
     const submenu = $('.context-submenu', menu)
     if (submenu) {
-      submenu.classList.toggle('flip-left', rect.right + 160 > vw)
+      const fitsRight = updatedRect.right + 168 <= vw
+      const fitsLeft = updatedRect.left - 168 >= 8
+      const useInline = vw <= 640 || (!fitsRight && !fitsLeft)
+      submenu.classList.toggle('submenu-inline', useInline)
+      submenu.classList.toggle('flip-left', !useInline && !fitsRight)
     }
   }
 
   /** @param {boolean} [instant=false] Skip animation for instant close */
   hideContextMenu(instant = false) {
     const menu = $('#context-menu')
+    const copyLinkBtn = document.querySelector('#ctx-copy-link')
+    copyLinkBtn?.classList.remove('is-open')
+    copyLinkBtn?.setAttribute('aria-expanded', 'false')
     try {
       if (instant) {
         menu.classList.add('instant')
@@ -439,6 +462,7 @@ class UIManager {
       }
     }
 
+    const onSelectAll = () => urlInput.select()
     const onClose = () => dialog.close()
 
     /** @param {Event} e */
@@ -448,11 +472,13 @@ class UIManager {
 
     const onDialogClose = () => {
       $('#copy-share-url-btn').removeEventListener('click', onCopy)
+      urlInput.removeEventListener('focus', onSelectAll)
       $('#share-dialog-close').removeEventListener('click', onClose)
       dialog.removeEventListener('click', onBackdropClick)
     }
 
     $('#copy-share-url-btn').addEventListener('click', onCopy)
+    urlInput.addEventListener('focus', onSelectAll)
     $('#share-dialog-close').addEventListener('click', onClose)
     dialog.addEventListener('click', onBackdropClick)
     dialog.addEventListener('close', onDialogClose, { once: true })
@@ -496,6 +522,7 @@ class UIManager {
       }
     }
 
+    const onSelectAll = () => urlInput.select()
     const onClose = () => dialog.close()
 
     /** @param {Event} e */
@@ -506,10 +533,12 @@ class UIManager {
     const onDialogClose = () => {
       $('#file-qr-close').removeEventListener('click', onClose)
       copyBtn.removeEventListener('click', onCopy)
+      urlInput.removeEventListener('focus', onSelectAll)
       dialog.removeEventListener('click', onBackdropClick)
     }
 
     copyBtn.addEventListener('click', onCopy)
+    urlInput.addEventListener('focus', onSelectAll)
     $('#file-qr-close').addEventListener('click', onClose)
     dialog.addEventListener('click', onBackdropClick)
     dialog.addEventListener('close', onDialogClose, { once: true })

@@ -192,6 +192,9 @@ class UploadManager {
     const app = $('#app')
     const dropzone = $('#dropzone')
 
+    /** @param {DragEvent} e */
+    const hasFiles = (e) => Boolean(e.dataTransfer?.types?.includes('Files'))
+
     const showDropzone = () => {
       this.#dragCounter++
       dropzone.hidden = false
@@ -206,6 +209,11 @@ class UploadManager {
     }
 
     const handleDrop = (/** @type {DragEvent} */ e) => {
+      if (!hasFiles(e)) {
+        this.#dragCounter = 0
+        dropzone.hidden = true
+        return
+      }
       e.preventDefault()
       e.stopPropagation()
       this.#dragCounter = 0
@@ -219,16 +227,19 @@ class UploadManager {
     }
 
     app.addEventListener('dragenter', (e) => {
+      if (!hasFiles(e)) return
       e.preventDefault()
       showDropzone()
     })
 
     app.addEventListener('dragleave', (e) => {
+      if (!hasFiles(e)) return
       e.preventDefault()
       hideDropzone()
     })
 
     app.addEventListener('dragover', (/** @type {DragEvent} */ e) => {
+      if (!hasFiles(e)) return
       e.preventDefault()
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
     })
@@ -236,16 +247,19 @@ class UploadManager {
     app.addEventListener('drop', handleDrop)
 
     dropzone.addEventListener('dragenter', (e) => {
+      if (!hasFiles(e)) return
       e.preventDefault()
       showDropzone()
     })
 
     dropzone.addEventListener('dragleave', (e) => {
+      if (!hasFiles(e)) return
       e.preventDefault()
       hideDropzone()
     })
 
     dropzone.addEventListener('dragover', (/** @type {DragEvent} */ e) => {
+      if (!hasFiles(e)) return
       e.preventDefault()
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
     })
@@ -364,6 +378,9 @@ class UploadManager {
       $('#upload-panel-progress').setAttribute('aria-valuenow', String(percent))
     }
     updateOverallProgress(0, 0)
+    if (ownsPanel()) {
+      $('#upload-panel-summary').textContent = t('uploadPreparing')
+    }
 
     const cfg = this.#config.get()
     const filenameTpl = cfg.filenameTpl || ''
@@ -500,7 +517,9 @@ class UploadManager {
           u.updateStatus(compressionStatus || filesize(compressed.size))
           return result
         } catch (e) {
-          u.updateStatus('')
+          document.getElementById(u.id)?.classList.add('is-error')
+          const detail = e instanceof Error && /^HTTP \d+$/.test(e.message) ? `${t('uploadFailed')} (${e.message})` : t('uploadFailed')
+          u.updateStatus(detail)
           throw e
         } finally {
           completed++

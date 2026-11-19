@@ -1,5 +1,6 @@
 import { ConfigManager } from './config-manager.js'
 import { R2Client } from './r2-client.js'
+import { UIManager } from './ui-manager.js'
 import { getCurrentLang } from './i18n.js'
 
 /** @param {ParentNode} root @param {string} selector */
@@ -335,10 +336,19 @@ class BucketManagerUI {
     if (!manager) return
     this.#bound = true
 
-    must(manager, '.bucket-add-toggle').addEventListener('click', () => this.#toggleAddPanel(true))
+    must(manager, '.bucket-add-toggle').addEventListener('click', () => {
+      const panel = /** @type {HTMLElement | null} */ (manager.querySelector('.bucket-add-panel'))
+      this.#toggleAddPanel(Boolean(panel?.hidden))
+    })
     must(manager, '.bucket-add-cancel').addEventListener('click', () => this.#toggleAddPanel(false))
     must(manager, '.bucket-add-confirm').addEventListener('click', () => this.#addBucket())
-    must(manager, '.bucket-remove-btn').addEventListener('click', () => this.#removeCurrentBucket())
+    must(manager, '.bucket-add-panel').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && event.target instanceof HTMLInputElement) {
+        event.preventDefault()
+        must(manager, '.bucket-add-confirm').click()
+      }
+    })
+    must(manager, '.bucket-remove-btn').addEventListener('click', () => void this.#removeCurrentBucket())
     must(manager, '.bucket-test-btn').addEventListener('click', (event) => this.#testConnection(event))
     must(manager, '.bucket-copy-cors').addEventListener('click', () => this.#copyCors())
     must(manager, '#bucket-settings-select').addEventListener('change', (event) => {
@@ -422,6 +432,7 @@ class BucketManagerUI {
     const panel = /** @type {HTMLElement | null} */ (document.querySelector('.bucket-add-panel'))
     if (!panel) return
     panel.hidden = !open
+    document.querySelector('.bucket-add-toggle')?.setAttribute('aria-expanded', String(open))
     if (open) {
       const name = /** @type {HTMLInputElement | null} */ (panel.querySelector('#bucket-add-name'))
       name?.focus()
@@ -457,9 +468,11 @@ class BucketManagerUI {
     }
   }
 
-  #removeCurrentBucket() {
+  async #removeCurrentBucket() {
     const active = this.#config.getActiveBucket()
-    if (!active || !window.confirm(this.#m('confirmDelete'))) return
+    if (!active) return
+    const ok = await new UIManager().confirm(this.#m('remove'), this.#m('confirmDelete'))
+    if (!ok) return
     try {
       this.#config.removeBucket(active.id)
       this.#status(this.#m('removed'))
