@@ -3,7 +3,7 @@ import { t } from './i18n.js'
 import { FileExplorer } from './file-explorer.js'
 import { R2Client } from './r2-client.js'
 import { UIManager } from './ui-manager.js'
-import { getErrorMessage, extractFileName } from './utils.js'
+import { blobToPng, getErrorMessage, extractFileName } from './utils.js'
 import { destinationConflict } from './file-operation-guards.js'
 
 class FileOperations {
@@ -231,20 +231,25 @@ class FileOperations {
     let success = 0
     let fail = 0
 
-    for (const item of items) {
-      try {
-        if (item.isFolder) {
-          await this.#recursiveOperation(item.key, async (k) => this.#r2.deleteObject(k), false)
+    for (let i = 0; i < items.length; i += 5) {
+      const batch = items.slice(i, i + 5)
+      await Promise.all(
+        batch.map(async (item) => {
           try {
-            await this.#r2.deleteObject(item.key)
-          } catch {}
-        } else {
-          await this.#r2.deleteObject(item.key)
-        }
-        success++
-      } catch {
-        fail++
-      }
+            if (item.isFolder) {
+              await this.#recursiveOperation(item.key, async (k) => this.#r2.deleteObject(k), false)
+              try {
+                await this.#r2.deleteObject(item.key)
+              } catch {}
+            } else {
+              await this.#r2.deleteObject(item.key)
+            }
+            success++
+          } catch {
+            fail++
+          }
+        }),
+      )
     }
 
     this.#ui.toast(
@@ -278,32 +283,41 @@ class FileOperations {
     if (destFolder === null) return false
 
     const folder = FileOperations.#toFolderPrefix(destFolder)
-    this.#ui.toast(t('batchMoving', { count }), 'info')
-    let success = 0
-    let fail = 0
-
+    const tasks = []
     for (const item of items) {
       const name = extractFileName(item.key)
       const dest = folder + name + (item.isFolder ? '/' : '')
       if (destinationConflict(item.key, dest, item.isFolder)) continue
+      tasks.push({ item, dest })
+    }
 
-      try {
-        if (item.isFolder) {
-          await this.#recursiveOperation(
-            item.key,
-            async (/** @type {string} */ srcKey) => {
-              await this.#r2.copyObject(srcKey, dest + srcKey.substring(item.key.length))
-            },
-            true,
-          )
-        } else {
-          await this.#r2.copyObject(item.key, dest)
-          await this.#r2.deleteObject(item.key)
-        }
-        success++
-      } catch {
-        fail++
-      }
+    this.#ui.toast(t('batchMoving', { count }), 'info')
+    let success = 0
+    let fail = 0
+
+    for (let i = 0; i < tasks.length; i += 5) {
+      const batch = tasks.slice(i, i + 5)
+      await Promise.all(
+        batch.map(async ({ item, dest }) => {
+          try {
+            if (item.isFolder) {
+              await this.#recursiveOperation(
+                item.key,
+                async (/** @type {string} */ srcKey) => {
+                  await this.#r2.copyObject(srcKey, dest + srcKey.substring(item.key.length))
+                },
+                true,
+              )
+            } else {
+              await this.#r2.copyObject(item.key, dest)
+              await this.#r2.deleteObject(item.key)
+            }
+            success++
+          } catch {
+            fail++
+          }
+        }),
+      )
     }
 
     this.#ui.toast(
@@ -339,31 +353,40 @@ class FileOperations {
     if (destFolder === null) return false
 
     const folder = FileOperations.#toFolderPrefix(destFolder)
-    this.#ui.toast(t('batchCopying', { count }), 'info')
-    let success = 0
-    let fail = 0
-
+    const tasks = []
     for (const item of items) {
       const name = extractFileName(item.key)
       const dest = folder + name + (item.isFolder ? '/' : '')
       if (destinationConflict(item.key, dest, item.isFolder)) continue
+      tasks.push({ item, dest })
+    }
 
-      try {
-        if (item.isFolder) {
-          await this.#recursiveOperation(
-            item.key,
-            async (/** @type {string} */ srcKey) => {
-              await this.#r2.copyObject(srcKey, dest + srcKey.substring(item.key.length))
-            },
-            false,
-          )
-        } else {
-          await this.#r2.copyObject(item.key, dest)
-        }
-        success++
-      } catch {
-        fail++
-      }
+    this.#ui.toast(t('batchCopying', { count }), 'info')
+    let success = 0
+    let fail = 0
+
+    for (let i = 0; i < tasks.length; i += 5) {
+      const batch = tasks.slice(i, i + 5)
+      await Promise.all(
+        batch.map(async ({ item, dest }) => {
+          try {
+            if (item.isFolder) {
+              await this.#recursiveOperation(
+                item.key,
+                async (/** @type {string} */ srcKey) => {
+                  await this.#r2.copyObject(srcKey, dest + srcKey.substring(item.key.length))
+                },
+                false,
+              )
+            } else {
+              await this.#r2.copyObject(item.key, dest)
+            }
+            success++
+          } catch {
+            fail++
+          }
+        }),
+      )
     }
 
     this.#ui.toast(
@@ -481,7 +504,7 @@ class FileOperations {
       this.#ui.toast(t('copyImageNotSupportedType'), 'error')
       return
     }
-    if (!navigator.clipboard || !window.ClipboardItem) {
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
       this.#ui.toast(t('copyImageNotSupported'), 'error')
       return
     }
@@ -489,8 +512,8 @@ class FileOperations {
       const url = this.#r2.getPublicUrl(key) ?? (await this.#r2.getPresignedUrl(key))
       const res = await fetch(url)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const blob = await res.blob()
-      const item = new ClipboardItem({ [blob.type || 'image/png']: blob })
+      const pngBlob = await blobToPng(await res.blob())
+      const item = new ClipboardItem({ 'image/png': pngBlob })
       await navigator.clipboard.write([item])
       this.#ui.toast(t('copyImageSuccess'), 'success')
     } catch {
@@ -537,11 +560,17 @@ class FileOperations {
       const result = await this.#r2.listObjects(prefix, token)
       if (result.hasFolderMarker && !allKeys.includes(prefix)) allKeys.push(prefix)
       for (const file of result.files) allKeys.push(file.key)
-      for (const folder of result.folders) {
+      for (let i = 0; i < result.folders.length; i += 4) {
+        const batch = result.folders.slice(i, i + 4)
         // CommonPrefixes are virtual directories, not guaranteed R2 objects.
         // Recurse into them; only exact marker objects may be copied/deleted.
-        const subKeys = await this.#collectAllKeys(folder.key)
-        allKeys.push(...subKeys)
+        const nested = await Promise.all(
+          batch.map(async (folder) => {
+            const subKeys = await this.#collectAllKeys(folder.key)
+            return subKeys
+          }),
+        )
+        for (const subKeys of nested) allKeys.push(...subKeys)
       }
       token = result.isTruncated ? result.nextToken : ''
     } while (token)

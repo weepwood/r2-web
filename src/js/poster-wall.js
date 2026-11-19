@@ -507,6 +507,7 @@ class PosterWall {
           const delay = Math.min(ENTRANCE_MAX_DELAY_S, Math.max(0, (col + row) * 0.5 * ENTRANCE_STAGGER_S))
           node.classList.add('is-entering')
           node.style.setProperty('--wall-enter-delay', `${Math.round(delay * 1000)}ms`)
+          node.addEventListener('animationend', () => node?.classList.remove('is-entering'), { once: true })
         }
         this.#nodes.set(instance.instanceId, node)
         this.#canvas.append(node)
@@ -526,10 +527,9 @@ class PosterWall {
       if (node.classList.contains('is-active') !== active) {
         node.classList.toggle('is-active', active)
         node.setAttribute('aria-pressed', String(active))
-        node.style.zIndex = active ? '5' : focused ? '3' : '1'
-      } else if (focused && node.style.zIndex !== '3' && !active) {
-        node.style.zIndex = '3'
       }
+      const nextZ = active ? '5' : focused ? '3' : '1'
+      if (node.style.zIndex !== nextZ) node.style.zIndex = nextZ
       node.classList.toggle('is-focused', focused)
     }
 

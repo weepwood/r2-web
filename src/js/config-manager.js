@@ -257,7 +257,9 @@ class ConfigManager {
         const incomingProfile = this.#findActiveProfile(incoming)
         if (currentProfile && incomingProfile) {
           for (const bucket of incomingProfile.buckets) {
-            if (!currentProfile.buckets.some((item) => item.name === bucket.name)) currentProfile.buckets.push(bucket)
+            if (bucket.name && !currentProfile.buckets.some((item) => item.name === bucket.name)) {
+              currentProfile.buckets.push(bucket)
+            }
           }
           this.#saveState(current)
         } else {
@@ -283,8 +285,16 @@ class ConfigManager {
   }
 
   #ensureMigrated() {
+    const rawStr = localStorage.getItem(STORAGE_KEY)
+    if (!rawStr) return
+    try {
+      const raw = JSON.parse(rawStr)
+      if (raw?.schemaVersion === SCHEMA_VERSION && Array.isArray(raw.profiles)) return
+    } catch {
+      return
+    }
     const state = this.loadState()
-    if (state.profiles.length > 0 || localStorage.getItem(STORAGE_KEY)) this.#saveState(state, false)
+    if (state.profiles.length > 0) this.#saveState(state, false)
   }
 
   /** @returns {StoredConfig} */

@@ -710,6 +710,28 @@ class UIManager {
       }
     })
 
+    document.addEventListener('focusin', (e) => {
+      const target = e.target instanceof Element ? e.target.closest('[data-tooltip]') : null
+      if (!(target instanceof HTMLElement)) return
+      try {
+        if (!target.matches(':focus-visible')) return
+      } catch {
+        return
+      }
+      if (showTimer) clearTimeout(showTimer)
+      currentTarget = target
+      show(target)
+    })
+
+    document.addEventListener('focusout', (e) => {
+      const target = e.target instanceof Element ? e.target.closest('[data-tooltip]') : null
+      if (target && target === currentTarget) hide()
+    })
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && currentTarget) hide()
+    })
+
     document.addEventListener('pointerdown', hide)
     document.addEventListener('scroll', hide, true)
   }

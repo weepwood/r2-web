@@ -363,6 +363,12 @@ class BucketManagerUI {
     submit?.addEventListener(
       'click',
       () => {
+        const requiredIds = ['#cfg-account-id', '#cfg-access-key', '#cfg-secret-key', '#cfg-bucket']
+        const allValid = requiredIds.every((sel) => {
+          const el = /** @type {HTMLInputElement | null} */ (document.querySelector(sel))
+          return Boolean(el?.value.trim())
+        })
+        if (!allValid) return
         const active = this.#config.getActiveBucket()
         const alias = /** @type {HTMLInputElement | null} */ (document.querySelector('#cfg-bucket-alias'))
         if (active && alias) this.#config.updateBucket(active.id, { alias: alias.value.trim() })

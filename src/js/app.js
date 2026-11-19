@@ -361,7 +361,7 @@ class App {
     syncSecretBtnLabel('#toggle-tinify-key', '#cfg-tinify-key')
 
     $('#batch-cancel-btn').setAttribute('aria-label', t('cancel'))
-    document.querySelectorAll('button.icon-btn[data-tooltip]').forEach((button) => {
+    document.querySelectorAll('button[data-tooltip]').forEach((button) => {
       const label = /** @type {HTMLElement} */ (button).dataset.tooltip
       if (label) button.setAttribute('aria-label', label)
     })
@@ -426,13 +426,8 @@ class App {
         this.#appEventsBound = true
       }
       await this.#explorer.navigate('')
-    } catch (/** @type {any} */ err) {
-      if (err.message === 'AUTH_FAILED') {
-        this.#config.clear()
-        /** @type {HTMLElement} */
-        $('#app').hidden = true
-        this.#showHero()
-      }
+    } catch {
+      // FileExplorer already surfaces connection/auth errors via toast; keep #app visible so user can open Settings.
     }
   }
 
@@ -682,13 +677,13 @@ class App {
     if (densityInput) densityInput.value = currentDensityValue
     thumbnailModeInput.value = getThumbnailMode()
 
-    if (cfg.accountId) accountInput.value = cfg.accountId
-    if (cfg.accessKeyId) accessInput.value = cfg.accessKeyId
-    if (cfg.secretAccessKey) secretInput.value = cfg.secretAccessKey
-    if (cfg.bucket) bucketInput.value = cfg.bucket
-    if (cfg.filenameTpl) tplInput.value = cfg.filenameTpl
+    accountInput.value = cfg.accountId || ''
+    accessInput.value = cfg.accessKeyId || ''
+    secretInput.value = cfg.secretAccessKey || ''
+    bucketInput.value = cfg.bucket || ''
+    if (tplInput) tplInput.value = cfg.filenameTpl || ''
     if (tplScopeInput) tplScopeInput.value = cfg.filenameTplScope || 'images'
-    if (cfg.customDomain) domainInput.value = cfg.customDomain
+    if (domainInput) domainInput.value = cfg.customDomain || ''
     if (bucketAccessInput) bucketAccessInput.value = cfg.bucketAccess || 'public'
 
     if (compressModeInput) compressModeInput.value = cfg.compressMode || 'none'
@@ -796,6 +791,9 @@ class App {
     $('#logout-btn').addEventListener('click', async () => {
       const ok = await this.#ui.confirm(t('logoutConfirmTitle'), t('logoutConfirmMsg'))
       if (!ok) return
+      if (this.#batchMode) this.#exitBatchMode()
+      this.#explorer?.invalidateCache()
+      $('#upload-panel').hidden = true
       this.#config.clear()
       this.#wall.close()
       this.#details.close()
@@ -1225,7 +1223,13 @@ class App {
     })
 
     $('#new-folder-btn').addEventListener('click', async () => {
-      const name = await this.#ui.prompt(t('newFolderTitle'), t('newFolderLabel'))
+      const name = await this.#ui.prompt(t('newFolderTitle'), t('newFolderLabel'), '', {
+        validate: (v) => {
+          const illegal = v.match(/[/\\:*?"<>|\x00-\x1F]/g)
+          if (illegal) return t('renameInvalidChars', { chars: [...new Set(illegal)].join('  ') })
+          return null
+        },
+      })
       if (!name) return
       try {
         const key = this.#explorer.currentPrefix + name
