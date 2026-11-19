@@ -124,3 +124,25 @@ test('App clears stale settings inputs, validates folder names, cleans logout st
   assert.match(wall, /const nextZ = active \? '5' : focused \? '3' : '1'/)
   assert.match(bucket, /if \(!allValid\) return/)
 })
+
+test('CSP permits WASM local compression and compressFile has canvas fallback', () => {
+  const html = read('src/index.html')
+  const upload = read('src/js/upload-manager.js')
+  assert.match(html, /script-src[^;]*'wasm-unsafe-eval'/)
+  assert.match(html, /worker-src[^;]*https:\/\/esm\.sh/)
+  assert.match(upload, /await import\('@jsquash\/jpeg'\)/)
+  assert.match(upload, /await import\('@jsquash\/oxipng'\)/)
+  assert.match(upload, /await import\('@jsquash\/webp'\)/)
+  assert.match(upload, /await import\('@jsquash\/avif'\)/)
+  assert.match(upload, /encodeWithCanvas\(canvas, outputType, fallbackQuality\)/)
+})
+
+test('drag-and-drop traverses folders recursively and preserves relative folder placement', () => {
+  const upload = read('src/js/upload-manager.js')
+  assert.match(upload, /webkitGetAsEntry/)
+  assert.match(upload, /#readDirectoryEntries\(dirEntry\)/)
+  assert.match(upload, /#collectDroppedEntries\(entries\)/)
+  assert.match(upload, /const relDir = rawRelativePath\.includes\('\/'\)/)
+  assert.match(upload, /key = currentPrefix \+ relDir \+ processedName/)
+  assert.match(upload, /if \(uploads\.some\(\(u\) => u\.key\.slice\(currentPrefix\.length\)\.includes\('\/'\)\)\)/)
+})
