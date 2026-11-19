@@ -2,16 +2,32 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
+  LATTICE_CELL,
+  LATTICE_GAP,
+  MAX_RENDERED_INSTANCES,
   WALL_CELL,
   WALL_GAP,
   WALL_MOTIFS,
   buildWallLayout,
   cameraBounds,
   focusReflow,
+  getLatticeGeometry,
   intersects,
+  layoutExpandedBlock,
+  layoutLattice,
+  locateNearestInstance,
+  locateStepCandidates,
+  pickAdjacentInstance,
   preserveTileAnchor,
   zoomAt,
 } from '../src/js/poster-wall-layout.js'
+import {
+  BLOCK_COLS,
+  BLOCK_ROWS,
+  SLOTS_PER_BLOCK,
+  getBlockReflow,
+  getBlockTemplate,
+} from '../src/js/poster-wall-blocks.js'
 
 const fixtures = Array.from({length: 88}, (_, i) => ({key: `photo-${i}.jpg`,size:123}))
 const files = (path) => readFileSync(new URL('../' + path, import.meta.url), 'utf8')
@@ -164,4 +180,93 @@ test('responsive mosaic change retains the same image screen anchor', () => {
     assert.ok(Math.abs(newY - oldY) < 0.000001)
     assert.equal(retained.scale, camera.scale)
   }
+})
+
+test('12x8 block templates and all 192 focus reflows are exact non-overlapping covers with 6x6 expansion', () => {
+  for (let row = 0; row < 4; row++) {
+    for (let col = 0; col < 4; col++) {
+      const tpl = getBlockTemplate(col, row)
+      assert.equal(tpl.length, SLOTS_PER_BLOCK)
+      const baseCells = new Set()
+      for (const s of tpl) {
+        for (let y = s.y; y < s.y + s.rows; y++) {
+          for (let x = s.x; x < s.x + s.cols; x++) {
+            assert.ok(x >= 0 && x < BLOCK_COLS && y >= 0 && y < BLOCK_ROWS)
+            const k = `${x},${y}`
+            assert.ok(!baseCells.has(k), `base overlap ${col},${row} at ${k}`)
+            baseCells.add(k)
+          }
+        }
+      }
+      assert.equal(baseCells.size, BLOCK_COLS * BLOCK_ROWS)
+
+      for (let slot = 0; slot < SLOTS_PER_BLOCK; slot++) {
+        const reflow = getBlockReflow(col, row, slot)
+        assert.ok(reflow && reflow.length === SLOTS_PER_BLOCK)
+        assert.equal(reflow[slot].cols, 6)
+        assert.equal(reflow[slot].rows, 6)
+        const cells = new Set()
+        for (const s of reflow) {
+          for (let y = s.y; y < s.y + s.rows; y++) {
+            for (let x = s.x; x < s.x + s.cols; x++) {
+              assert.ok(x >= 0 && x < BLOCK_COLS && y >= 0 && y < BLOCK_ROWS)
+              const k = `${x},${y}`
+              assert.ok(!cells.has(k), `reflow overlap ${col},${row}:${slot} at ${k}`)
+              cells.add(k)
+            }
+          }
+        }
+        assert.equal(cells.size, BLOCK_COLS * BLOCK_ROWS)
+      }
+    }
+  }
+})
+
+test('infinite lattice covers negative and positive worlds, caps rendered instances, and expands in-block without cascade', () => {
+  const count = 30
+  const geometry = getLatticeGeometry(count, { cell: LATTICE_CELL, gap: LATTICE_GAP })
+  const negativeTiles = layoutLattice(geometry, count, { x: -2500, y: -1800, w: 1600, h: 1100 }, 0)
+  assert.ok(negativeTiles.length > 0)
+  assert.ok(negativeTiles.some((t) => t.repeatX < 0 && t.repeatY < 0))
+
+  const huge = layoutLattice(geometry, count, { x: -50000, y: -50000, w: 100000, h: 100000 }, 0)
+  assert.equal(huge.length, MAX_RENDERED_INSTANCES)
+
+  const target = negativeTiles[3]
+  const expanded = layoutExpandedBlock(geometry, count, target)
+  assert.equal(expanded.size, SLOTS_PER_BLOCK)
+  const activeRect = expanded.get(target.instanceId)
+  assert.ok(activeRect && activeRect.w > target.w && activeRect.h > target.h)
+
+  // Every non-block tile keeps its original geometry untouched
+  for (const other of negativeTiles) {
+    if (!expanded.has(other.instanceId)) {
+      assert.equal(expanded.get(other.instanceId), undefined)
+    }
+  }
+
+  // Nearest instance locator & directional arrow navigation work across repeats
+  const nearest = locateNearestInstance(geometry, count, 5, { x: -2000, y: -1200 })
+  assert.ok(nearest && nearest.index === 5)
+  const candidates = locateStepCandidates(geometry, count, target)
+  for (const dir of /** @type {const} */ (['left', 'right', 'up', 'down'])) {
+    const stepped = pickAdjacentInstance(target, dir, candidates, expanded)
+    assert.ok(stepped && stepped.instanceId !== target.instanceId, `missing neighbor in direction ${dir}`)
+  }
+})
+
+test('PosterWall wires infinite lattice, inertia, smooth wheel, double-click guard, finder and expanded actions', () => {
+  const wall = files('src/js/poster-wall.js')
+  const html = files('src/index.html')
+  assert.match(wall, /#animateInertia\(/)
+  assert.match(wall, /#wheelZoom/)
+  assert.match(wall, /#firstPressInstanceId/)
+  assert.match(wall, /#moveFocus\(/)
+  assert.match(wall, /#stepByIndex\(/)
+  assert.match(wall, /#jumpToFinderMatch\(/)
+  assert.match(html, /id="wall-finder"/)
+  assert.match(html, /id="wall-prev"/)
+  assert.match(html, /id="wall-next"/)
+  assert.match(html, /id="wall-copy-url"/)
+  assert.match(html, /id="wall-download"/)
 })
