@@ -1,11 +1,38 @@
 import { selectThumbnailWidth } from './thumbnail-utils.js'
 import { ImageAssetService } from './image-asset-service.js'
-import { extractFileName } from './utils.js'
+import { extractFileName, formatBytes } from './utils.js'
 import { t } from './i18n.js'
-import { buildWallLayout, cameraBounds, focusReflow, intersects, preserveTileAnchor, zoomAt } from './poster-wall-layout.js'
+import {
+  LATTICE_CELL,
+  LATTICE_GAP,
+  WALL_MAX_SCALE,
+  WALL_MIN_SCALE,
+  cameraBounds,
+  findNearestInstance,
+  getLatticeGeometry,
+  intersects,
+  layoutExpandedBlock,
+  layoutLattice,
+  locateNearestInstance,
+  locateStepCandidates,
+  pickAdjacentInstance,
+  zoomAt,
+} from './poster-wall-layout.js'
 
 /** @typedef {{key:string,size?:number,lastModified?:number|string}} ImageItem */
-/** @typedef {{key:string,node:HTMLButtonElement,img:HTMLImageElement,cancel:()=>void,active:boolean,stopped:boolean,requestedWidth:number}} ImageTask */
+/** @typedef {import('./poster-wall-layout.js').LatticeInstance} LatticeInstance */
+/** @typedef {{key:string,instanceId:string,node:HTMLButtonElement,img:HTMLImageElement,cancel:()=>void,active:boolean,stopped:boolean,requestedWidth:number}} ImageTask */
+
+const ENTRANCE_STAGGER_S = 0.03
+const ENTRANCE_MAX_DELAY_S = 0.34
+const INERTIA = {
+  minSpeed: 40,
+  maxSpeed: 4000,
+  power: 0.3,
+  timeConstant: 280,
+  restDelta: 0.5,
+  staleReleaseMs: 80,
+}
 
 class PosterWall {
   /** @type {import('./r2-client.js').R2Client} */
@@ -14,6 +41,10 @@ class PosterWall {
   #images
   /** @type {(item:ImageItem)=>void} */
   #onPreview
+  /** @type {((item:ImageItem)=>void)|undefined} */
+  #onCopyUrl
+  /** @type {((item:ImageItem)=>void)|undefined} */
+  #onDownload
   /** @type {()=>Promise<void>|void} */
   #onMore
   /** @type {()=>void} */
@@ -26,12 +57,13 @@ class PosterWall {
   #canvas
   /** @type {ImageItem[]} */
   #items = []
-  /** @type {ReturnType<typeof buildWallLayout>} */
+  #geometry = getLatticeGeometry(0)
+  /** @type {LatticeInstance[]} */
   #layout = []
-  /** @type {Map<string,import('./poster-wall-layout.js').WallTile>} */
-  #tileByKey = new Map()
-  /** @type {ReturnType<typeof focusReflow>} */
-  #positions = new Map()
+  /** @type {Map<string,LatticeInstance>} */
+  #visibleInstances = new Map()
+  /** @type {Map<string,{x:number,y:number,w:number,h:number}>} */
+  #expandedRects = new Map()
   /** @type {Map<string,HTMLButtonElement>} */
   #nodes = new Map()
   /** @type {Map<string,ImageTask>} */
@@ -43,33 +75,51 @@ class PosterWall {
   #qualityTimer = 0
   #lastQualityScale = 0
   #camera = { x: 40, y: 80, scale: 0.76 }
+  /** @type {LatticeInstance|null} */
+  #activeInstance = null
+  /** @type {LatticeInstance|null} */
+  #focusedInstance = null
   /** @type {string|null} */
-  #activeKey = null
+  #firstPressInstanceId = null
   #hasMore = false
   #renderFrame = 0
   #cameraFrame = 0
+  #wheelFrame = 0
+  /** @type {{targetScale:number,x:number,y:number,lastTime:number|null}|null} */
+  #wheelZoom = null
   #reducedMotion = false
+  #entranceActive = false
   #pinchDistance = 0
   #lastPinchCenter = { x: 0, y: 0 }
-  /** @type {Map<number,{x:number,y:number,originX:number,originY:number}>} */
+  /** @type {Map<number,{x:number,y:number,originX:number,originY:number,lastX:number,lastY:number,lastTime:number,vx:number,vy:number}>} */
   #pointers = new Map()
   /** @type {string|null} */
   #pointerTile = null
   #dragged = false
   #gestureUsedPinch = false
-  #columnCount = 3
   #viewportSize = { width: 0, height: 0 }
   /** @type {Map<HTMLElement,boolean>} */
   #backgroundInert = new Map()
+  /** @type {number[]} */
+  #searchMatches = []
+  #searchMatchCursor = 0
 
   /**
    * @param {import('./r2-client.js').R2Client} r2
-   * @param {{onPreview:(item:ImageItem)=>void,onLoadMore:()=>Promise<void>|void,onClose:()=>void}} options
+   * @param {{
+   *   onPreview:(item:ImageItem)=>void,
+   *   onCopyUrl?:(item:ImageItem)=>void,
+   *   onDownload?:(item:ImageItem)=>void,
+   *   onLoadMore:()=>Promise<void>|void,
+   *   onClose:()=>void
+   * }} options
    */
-  constructor(r2, { onPreview, onLoadMore, onClose }) {
+  constructor(r2, { onPreview, onCopyUrl, onDownload, onLoadMore, onClose }) {
     this.#r2 = r2
     this.#images = new ImageAssetService(r2)
     this.#onPreview = onPreview
+    this.#onCopyUrl = onCopyUrl
+    this.#onDownload = onDownload
     this.#onMore = onLoadMore
     this.#onClose = onClose
     this.#root = /** @type {HTMLElement} */ (document.querySelector('#poster-wall'))
@@ -80,6 +130,8 @@ class PosterWall {
       this.#reducedMotion = event.matches
       if (event.matches) {
         this.#cancelCameraMotion()
+        this.#stopWheelZoom()
+        this.#entranceActive = false
         for (const tile of this.#nodes.values()) tile.getAnimations().forEach((animation) => animation.cancel())
       }
     })
@@ -100,35 +152,10 @@ class PosterWall {
     if (previousSize.width === width && previousSize.height === height) return
     this.#viewportSize = { width, height }
     this.#cancelCameraMotion()
-    // Keep the midpoint of the current viewport steady on ordinary resizes.
+    this.#stopWheelZoom()
     this.#camera.x += (width - previousSize.width) / 2
     this.#camera.y += (height - previousSize.height) / 2
-
-    const nextColumns = width < 760 ? 2 : 3
-    if (nextColumns === this.#columnCount) {
-      this.#scheduleRender()
-      return
-    }
-
-    const previousRects = this.#getVisualRects()
-    const centerX = (width / 2 - this.#camera.x) / this.#camera.scale
-    const centerY = (height / 2 - this.#camera.y) / this.#camera.scale
-    /** @param {{x:number,y:number,w:number,h:number}} rect */
-    const distance = (rect) => (rect.x + rect.w / 2 - centerX) ** 2 +
-      (rect.y + rect.h / 2 - centerY) ** 2
-    const anchor = this.#activeKey ?? this.#layout.reduce((best, tile) => {
-      const rect = this.#positions.get(tile.key)
-      const closest = best ? this.#positions.get(best) : null
-      if (!rect) return best
-      if (!closest) return tile.key
-      return distance(rect) < distance(closest) ? tile.key : best
-    }, /** @type {string | null} */ (null))
-    const before = anchor ? this.#positions.get(anchor) : null
-    this.#columnCount = nextColumns
-    this.#recalculate()
-    const after = anchor ? this.#positions.get(anchor) : null
-    if (before && after) this.#camera = preserveTileAnchor(this.#camera, before, after)
-    this.#render(previousRects)
+    this.#scheduleRender()
   }
 
   /** @param {ImageItem[]} items @param {boolean} hasMore */
@@ -139,31 +166,60 @@ class PosterWall {
     }
     this.#root.hidden = false
     this.#viewportSize = { width: this.#viewport.clientWidth, height: this.#viewport.clientHeight }
-    // Keep Tab inside the presentation, without blocking native top-layer dialogs.
     for (const sibling of this.#root.parentElement?.children ?? []) {
       if (!(sibling instanceof HTMLElement) || sibling === this.#root) continue
       this.#backgroundInert.set(sibling, sibling.inert)
       sibling.inert = true
     }
-    this.#columnCount = this.#viewport.clientWidth < 760 ? 2 : 3
     this.#items = items
     this.#hasMore = hasMore
-    this.#activeKey = null
+    this.#activeInstance = null
+    this.#focusedInstance = null
+    this.#firstPressInstanceId = null
+    this.#entranceActive = !this.#reducedMotion
+    this.#closeFinder(false)
     this.#recalculate()
     this.resetCamera()
     this.#render()
+    this.#entranceActive = false
     this.#viewport.focus({ preventScroll: true })
   }
 
   /** @param {ImageItem[]} items @param {boolean} hasMore */
   update(items, hasMore) {
+    const activeKey = this.#activeInstance ? this.#items[this.#activeInstance.index]?.key : null
+    const focusedKey = this.#focusedInstance ? this.#items[this.#focusedInstance.index]?.key : null
     this.#items = items
     this.#hasMore = hasMore
     if (!this.isOpen) return
     const previous = this.#getVisualRects()
     this.#recalculate()
-    if (this.#activeKey && !this.#positions.has(this.#activeKey)) this.#activeKey = null
-    this.#positions = focusReflow(this.#layout, this.#activeKey)
+    if (activeKey) {
+      const idx = this.#items.findIndex((entry) => entry.key === activeKey)
+      const prevRect = this.#activeInstance
+      this.#activeInstance = idx >= 0 && prevRect
+        ? locateNearestInstance(this.#geometry, this.#items.length, idx, {
+            x: prevRect.x + prevRect.w / 2,
+            y: prevRect.y + prevRect.h / 2,
+          })
+        : null
+    } else {
+      this.#activeInstance = null
+    }
+    if (focusedKey) {
+      const idx = this.#items.findIndex((entry) => entry.key === focusedKey)
+      const prevRect = this.#focusedInstance
+      this.#focusedInstance = idx >= 0 && prevRect
+        ? locateNearestInstance(this.#geometry, this.#items.length, idx, {
+            x: prevRect.x + prevRect.w / 2,
+            y: prevRect.y + prevRect.h / 2,
+          })
+        : null
+    } else {
+      this.#focusedInstance = null
+    }
+    this.#expandedRects = layoutExpandedBlock(this.#geometry, this.#items.length, this.#activeInstance)
+    this.#refreshFinderMatches(false)
     this.#render(previous)
   }
 
@@ -178,13 +234,20 @@ class PosterWall {
     this.#qualityTimer = 0
     this.#lastQualityScale = 0
     this.#cancelCameraMotion()
+    this.#stopWheelZoom()
     this.#pointers.clear()
     this.#gestureUsedPinch = false
     this.#pointerTile = null
+    this.#firstPressInstanceId = null
     this.#dragged = false
     this.#viewport.classList.remove('is-dragging')
-    this.#activeKey = null
+    this.#activeInstance = null
+    this.#focusedInstance = null
+    this.#expandedRects.clear()
+    this.#visibleInstances.clear()
     this.#pinchDistance = 0
+    this.#entranceActive = false
+    this.#closeFinder(false)
     this.#cancelAllImages()
     this.#nodes.clear()
     this.#canvas.replaceChildren()
@@ -201,15 +264,28 @@ class PosterWall {
     document.querySelector('#wall-empty-title').textContent = t('wallEmptyTitle')
     document.querySelector('#wall-empty-hint').textContent = t('wallEmptyHint')
     document.querySelector('#wall-preview').textContent = t('wallOriginalPreview')
+    document.querySelector('#wall-copy-url').textContent = t('wallCopyUrl')
+    document.querySelector('#wall-download').textContent = t('wallDownload')
     document.querySelector('#wall-collapse').textContent = t('wallCollapse')
     document.querySelector('#wall-load-more').textContent = t('wallLoadMore')
+    const searchInput = /** @type {HTMLInputElement|null} */ (document.querySelector('#wall-search-input'))
+    if (searchInput) {
+      searchInput.placeholder = t('wallSearchPlaceholder')
+      searchInput.setAttribute('aria-label', t('wallSearch'))
+    }
     for (const [id, key] of [
       ['wall-close', 'wallExit'],
+      ['wall-search-toggle', 'wallSearch'],
+      ['wall-search-prev', 'wallPrev'],
+      ['wall-search-next', 'wallNext'],
+      ['wall-prev', 'wallPrev'],
+      ['wall-next', 'wallNext'],
       ['wall-zoom-in', 'wallZoomIn'],
       ['wall-zoom-out', 'wallZoomOut'],
       ['wall-reset', 'wallReset'],
     ]) {
-      const button = /** @type {HTMLElement} */ (document.querySelector('#' + id))
+      const button = /** @type {HTMLElement|null} */ (document.querySelector('#' + id))
+      if (!button) continue
       button.setAttribute('aria-label', t(/** @type {any} */ (key)))
       button.setAttribute('title', t(/** @type {any} */ (key)))
     }
@@ -217,9 +293,13 @@ class PosterWall {
   }
 
   #recalculate() {
-    this.#layout = buildWallLayout(this.#items, { columns: this.#columnCount })
-    this.#tileByKey = new Map(this.#layout.map((tile) => [tile.key, tile]))
-    this.#positions = focusReflow(this.#layout, this.#activeKey)
+    this.#geometry = getLatticeGeometry(this.#items.length, { cell: LATTICE_CELL, gap: LATTICE_GAP })
+    this.#layout = this.#items.length
+      ? Array.from({ length: Math.min(this.#items.length, 12) }, (_, index) =>
+          locateNearestInstance(this.#geometry, this.#items.length, index, { x: 0, y: 0 }),
+        ).filter(Boolean)
+      : []
+    this.#expandedRects = layoutExpandedBlock(this.#geometry, this.#items.length, this.#activeInstance)
   }
 
   /** @param {boolean} [animated] */
@@ -227,8 +307,6 @@ class PosterWall {
     const width = this.#viewport.clientWidth || window.innerWidth
     const height = this.#viewport.clientHeight || window.innerHeight
     const defaultScale = width < 640 ? 0.54 : width < 1100 ? 0.66 : 0.76
-    // Fit the first motif rather than assuming there are always many images.
-    // A one-image folder now opens centered instead of against empty canvas.
     const opening = this.#layout.slice(0, Math.min(this.#layout.length, 7))
     const left = opening.length ? Math.min(...opening.map((tile) => tile.x)) : 0
     const top = opening.length ? Math.min(...opening.map((tile) => tile.y)) : 0
@@ -269,6 +347,12 @@ class PosterWall {
     this.#cameraFrame = 0
   }
 
+  #stopWheelZoom() {
+    if (this.#wheelFrame) cancelAnimationFrame(this.#wheelFrame)
+    this.#wheelFrame = 0
+    this.#wheelZoom = null
+  }
+
   /**
    * Short interruptible UI-camera motion. Real pointer movements cancel it.
    * @param {{x:number,y:number,scale:number}} target
@@ -276,6 +360,7 @@ class PosterWall {
    */
   #animateCamera(target, duration) {
     this.#cancelCameraMotion()
+    this.#stopWheelZoom()
     if (this.#reducedMotion) {
       this.#camera = target
       this.#scheduleRender()
@@ -285,17 +370,97 @@ class PosterWall {
     const started = performance.now()
     /** @param {number} now */
     const tick = (now) => {
-      const t = Math.min(1, (now - started) / duration)
-      const eased = 1 - Math.pow(1 - t, 3)
+      const progress = Math.min(1, (now - started) / duration)
+      const eased = 1 - Math.pow(1 - progress, 3)
       this.#camera = {
         x: from.x + (target.x - from.x) * eased,
         y: from.y + (target.y - from.y) * eased,
         scale: from.scale + (target.scale - from.scale) * eased,
       }
       this.#scheduleRender()
-      this.#cameraFrame = t < 1 ? requestAnimationFrame(tick) : 0
+      this.#cameraFrame = progress < 1 ? requestAnimationFrame(tick) : 0
     }
     this.#cameraFrame = requestAnimationFrame(tick)
+  }
+
+  /**
+   * Smooth exponential coasting after pointer release, matching folia-major inertia.
+   * @param {number} vx
+   * @param {number} vy
+   */
+  #animateInertia(vx, vy) {
+    this.#cancelCameraMotion()
+    this.#stopWheelZoom()
+    if (this.#reducedMotion) return
+    const rawSpeed = Math.hypot(vx, vy)
+    if (rawSpeed < INERTIA.minSpeed) return
+    const speed = Math.min(rawSpeed, INERTIA.maxSpeed)
+    const ux = vx / rawSpeed
+    const uy = vy / rawSpeed
+    const totalDistance = speed * INERTIA.power
+    const fromX = this.#camera.x
+    const fromY = this.#camera.y
+    const started = performance.now()
+    /** @param {number} now */
+    const tick = (now) => {
+      const elapsed = now - started
+      const decay = Math.exp(-elapsed / INERTIA.timeConstant)
+      const moved = totalDistance * (1 - decay)
+      this.#camera.x = fromX + ux * moved
+      this.#camera.y = fromY + uy * moved
+      this.#scheduleRender()
+      if (totalDistance * decay > INERTIA.restDelta) {
+        this.#cameraFrame = requestAnimationFrame(tick)
+      } else {
+        this.#camera.x = fromX + ux * totalDistance
+        this.#camera.y = fromY + uy * totalDistance
+        this.#cameraFrame = 0
+        this.#scheduleRender()
+      }
+    }
+    this.#cameraFrame = requestAnimationFrame(tick)
+  }
+
+  /** @param {{x:number,y:number,w:number,h:number}} rect @param {boolean} [center] */
+  #panRectIntoView(rect, center = false) {
+    const vw = this.#viewport.clientWidth
+    const vh = this.#viewport.clientHeight
+    if (!vw || !vh) return
+    const { x, y, scale } = this.#camera
+    if (center) {
+      this.#animateCamera({
+        x: vw / 2 - (rect.x + rect.w / 2) * scale,
+        y: vh / 2 - (rect.y + rect.h / 2) * scale,
+        scale,
+      }, 320)
+      return
+    }
+    const padX = Math.min(56, vw * 0.08)
+    const padTop = 76
+    const padBottom = 88
+    const left = x + rect.x * scale
+    const right = x + (rect.x + rect.w) * scale
+    const top = y + rect.y * scale
+    const bottom = y + (rect.y + rect.h) * scale
+    let dx = 0
+    let dy = 0
+    if (right - left > vw - padX * 2) {
+      dx = vw / 2 - (left + right) / 2
+    } else if (left < padX) {
+      dx = padX - left
+    } else if (right > vw - padX) {
+      dx = (vw - padX) - right
+    }
+    if (bottom - top > vh - padTop - padBottom) {
+      dy = (vh - padTop - padBottom) / 2 + padTop - (top + bottom) / 2
+    } else if (top < padTop) {
+      dy = padTop - top
+    } else if (bottom > vh - padBottom) {
+      dy = (vh - padBottom) - bottom
+    }
+    if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+      this.#animateCamera({ x: x + dx, y: y + dy, scale }, 320)
+    }
   }
 
   #scheduleRender() {
@@ -310,30 +475,43 @@ class PosterWall {
     return new Map([...this.#nodes].map(([key, node]) => [key, node.getBoundingClientRect()]))
   }
 
-  /** @param {Map<string,DOMRect>} [previous] */
-  #render(previous) {
+  /** @param {Map<string,DOMRect>} [previous] @param {boolean} [revealActions] */
+  #render(previous, revealActions = false) {
     if (!this.isOpen) return
     const { x, y, scale } = this.#camera
     this.#canvas.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${scale})`
-    // At overview zoom, typography withdraws so the photographs read as one
-    // continuous mosaic. Hover, keyboard focus and selection still reveal it.
     const zoomLevel = scale < 0.58 ? 'overview' : scale > 1.45 ? 'detail' : 'normal'
     if (this.#root.dataset.zoomLevel !== zoomLevel) this.#root.dataset.zoomLevel = zoomLevel
     const bounds = cameraBounds(this.#camera, this.#viewport.clientWidth, this.#viewport.clientHeight)
+    const instances = layoutLattice(this.#geometry, this.#items.length, bounds, 0)
+    this.#visibleInstances = new Map(instances.map((inst) => [inst.instanceId, inst]))
+    if (this.#activeInstance && !this.#visibleInstances.has(this.#activeInstance.instanceId)) {
+      this.#visibleInstances.set(this.#activeInstance.instanceId, this.#activeInstance)
+    }
+
     const visible = new Set()
-    for (const tile of this.#layout) {
-      const rect = this.#positions.get(tile.key)
-      if (!rect || !intersects(rect, bounds)) continue
-      visible.add(tile.key)
-      let node = this.#nodes.get(tile.key)
+    const baseCol = Math.floor(bounds.x / (LATTICE_CELL + LATTICE_GAP))
+    const baseRow = Math.floor(bounds.y / (LATTICE_CELL + LATTICE_GAP))
+
+    for (const instance of this.#visibleInstances.values()) {
+      const rect = this.#expandedRects.get(instance.instanceId) ?? instance
+      if (!intersects(rect, bounds) && instance.instanceId !== this.#activeInstance?.instanceId) continue
+      visible.add(instance.instanceId)
+      let node = this.#nodes.get(instance.instanceId)
       if (!node) {
-        node = this.#createTile(tile)
-        this.#nodes.set(tile.key, node)
+        node = this.#createTile(instance)
+        if (this.#entranceActive) {
+          const col = Math.floor(instance.x / (LATTICE_CELL + LATTICE_GAP)) - baseCol
+          const row = Math.floor(instance.y / (LATTICE_CELL + LATTICE_GAP)) - baseRow
+          const delay = Math.min(ENTRANCE_MAX_DELAY_S, Math.max(0, (col + row) * 0.5 * ENTRANCE_STAGGER_S))
+          node.classList.add('is-entering')
+          node.style.setProperty('--wall-enter-delay', `${Math.round(delay * 1000)}ms`)
+        }
+        this.#nodes.set(instance.instanceId, node)
         this.#canvas.append(node)
-        this.#enqueueImage(tile, node)
+        this.#enqueueImage({ ...rect, key: instance.instanceId, index: instance.index }, node)
       }
-      // An interrupted spring starts at the tile's current visual location.
-      if (previous?.has(tile.key)) node.getAnimations().forEach((animation) => animation.cancel())
+      if (previous?.has(instance.instanceId)) node.getAnimations().forEach((animation) => animation.cancel())
       const layoutId = `${rect.x},${rect.y},${rect.w},${rect.h}`
       if (node.dataset.layoutRect !== layoutId) {
         node.dataset.layoutRect = layoutId
@@ -342,57 +520,70 @@ class PosterWall {
         node.style.width = `${rect.w}px`
         node.style.height = `${rect.h}px`
       }
-      const active = tile.key === this.#activeKey
+      const active = instance.instanceId === this.#activeInstance?.instanceId
+      const focused = instance.instanceId === this.#focusedInstance?.instanceId
       if (node.classList.contains('is-active') !== active) {
         node.classList.toggle('is-active', active)
         node.setAttribute('aria-pressed', String(active))
-        node.style.zIndex = active ? '5' : '1'
+        node.style.zIndex = active ? '5' : focused ? '3' : '1'
+      } else if (focused && node.style.zIndex !== '3' && !active) {
+        node.style.zIndex = '3'
       }
+      node.classList.toggle('is-focused', focused)
     }
 
     // Virtualization: preserve only visible, overscanned, focused or expanded tiles.
     for (const [key, node] of this.#nodes) {
-      if (visible.has(key) || key === this.#activeKey || node === document.activeElement) continue
+      if (
+        visible.has(key) ||
+        key === this.#activeInstance?.instanceId ||
+        key === this.#focusedInstance?.instanceId ||
+        node === document.activeElement
+      ) continue
       this.#discardImage(key)
       node.remove()
       this.#nodes.delete(key)
     }
 
     if (previous && !this.#reducedMotion) {
-      for (const [key, node] of this.#nodes) {
-        const from = previous.get(key)
-        if (!from || !visible.has(key)) continue
+      for (const [instanceId, node] of this.#nodes) {
+        const from = previous.get(instanceId)
+        if (!from || !visible.has(instanceId)) continue
         const to = node.getBoundingClientRect()
         const dx = (from.left - to.left) / scale
         const dy = (from.top - to.top) / scale
         const sx = to.width ? from.width / to.width : 1
         const sy = to.height ? from.height / to.height : 1
-        if (Math.abs(dx) + Math.abs(dy) < 0.5 && Math.abs(sx - 1) + Math.abs(sy - 1) < .01) continue
+        if (Math.abs(dx) + Math.abs(dy) < 0.5 && Math.abs(sx - 1) + Math.abs(sy - 1) < 0.01) continue
         this.#spring(node, dx, dy, sx, sy)
       }
     }
 
-    // Visible images are favored over overscan; start requests only after
-    // the whole visible set has been reconciled.
     this.#imageQueue = this.#imageQueue.filter((task) => !task.stopped)
-    this.#imageQueue.sort((a, b) => this.#imagePriority(a.key) - this.#imagePriority(b.key))
+    this.#imageQueue.sort((a, b) => this.#imagePriority(a.instanceId) - this.#imagePriority(b.instanceId))
     this.#pumpImages()
     if (Math.abs(this.#lastQualityScale - scale) >= 0.025) {
       this.#lastQualityScale = scale
       this.#scheduleQualityCheck()
     }
 
-    this.#root.classList.toggle('has-active', Boolean(this.#activeKey))
+    this.#root.classList.toggle('has-active', Boolean(this.#activeInstance))
     const focusActions = /** @type {HTMLElement} */ (document.querySelector('#wall-focus-actions'))
     const emptyState = /** @type {HTMLElement} */ (document.querySelector('#wall-empty'))
     const moreControl = /** @type {HTMLElement} */ (document.querySelector('#wall-more'))
-    if (this.#activeKey) {
+    if (this.#activeInstance) {
       focusActions.hidden = false
+      if (revealActions && !this.#reducedMotion) {
+        focusActions.classList.remove('is-revealing')
+        void focusActions.offsetWidth
+        focusActions.classList.add('is-revealing')
+      }
       if (!this.#positionFocusActions(focusActions)) focusActions.hidden = true
     } else {
       focusActions.hidden = true
+      focusActions.classList.remove('is-revealing')
     }
-    emptyState.hidden = this.#layout.length > 0
+    emptyState.hidden = this.#items.length > 0
     moreControl.hidden = !this.#hasMore
     this.#updateHud()
   }
@@ -404,7 +595,8 @@ class PosterWall {
    * @returns {boolean} Whether the selected tile is still onscreen.
    */
   #positionFocusActions(actions) {
-    const rect = this.#activeKey ? this.#positions.get(this.#activeKey) : null
+    const active = this.#activeInstance
+    const rect = active ? (this.#expandedRects.get(active.instanceId) ?? active) : null
     if (!rect) return false
     const { x, y, scale } = this.#camera
     const viewportWidth = this.#viewport.clientWidth
@@ -416,7 +608,7 @@ class PosterWall {
     if (projectedRight < 0 || projectedBottom < 0 || projectedLeft > viewportWidth || projectedTop > viewportHeight) {
       return false
     }
-    const width = actions.offsetWidth || 220
+    const width = actions.offsetWidth || 320
     const left = Math.max(14, Math.min(projectedRight - width, viewportWidth - width - 14))
     const top = Math.max(79, Math.min(projectedBottom + 10, viewportHeight - 76))
     actions.style.left = `${left}px`
@@ -436,35 +628,49 @@ class PosterWall {
   #spring(node, dx, dy, sx, sy) {
     const frames = []
     for (let step = 0; step <= 20; step++) {
-      const t = step / 20
-      const progress = step === 20 ? 1 : 1 - Math.exp(-9 * t) * (Math.cos(6.2 * t) + 0.32 * Math.sin(6.2 * t))
+      const progressNorm = step / 20
+      const progress = step === 20
+        ? 1
+        : 1 - Math.exp(-9 * progressNorm) * (Math.cos(6.2 * progressNorm) + 0.32 * Math.sin(6.2 * progressNorm))
       const left = 1 - progress
       frames.push({
-        offset: t,
+        offset: progressNorm,
         transform: `translate3d(${dx * left}px, ${dy * left}px, 0) scale(${1 + (sx - 1) * left}, ${1 + (sy - 1) * left})`,
       })
     }
     node.animate(frames, { duration: 480, easing: 'linear', fill: 'none' })
   }
 
-  /** @param {import('./poster-wall-layout.js').WallTile} tile */
-  #createTile(tile) {
+  /** @param {LatticeInstance} instance */
+  #createTile(instance) {
+    const item = this.#items[instance.index]
+    const fileName = extractFileName(item.key)
+    const ext = fileName.includes('.') ? fileName.split('.').pop().toUpperCase() : 'IMAGE'
+    const folder = item.key.split('/').slice(0, -1).filter(Boolean).at(-1)
+    const metaParts = [folder || 'R2', item.size ? formatBytes(item.size) : null, ext].filter(Boolean)
+
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'poster-tile'
-    button.classList.toggle('is-compact', tile.w < 330 || tile.h < 330)
-    button.dataset.key = tile.key
+    button.classList.toggle('is-compact', instance.w < 330 || instance.h < 330)
+    button.dataset.key = item.key
+    button.dataset.instanceId = instance.instanceId
+    button.dataset.index = String(instance.index)
     button.setAttribute('aria-pressed', 'false')
-    button.setAttribute('aria-label', t('wallOpenTile') + ': ' + extractFileName(tile.key))
+    button.setAttribute('aria-label', t('wallOpenTile') + ': ' + fileName)
 
     const media = document.createElement('span')
     media.className = 'poster-tile-media'
     const img = document.createElement('img')
     img.alt = ''
-    img.loading = 'eager' // culling controls the exact set of network requests
+    img.loading = 'eager'
     img.decoding = 'async'
     img.draggable = false
     media.append(img)
+
+    const badge = document.createElement('span')
+    badge.className = 'poster-tile-badge'
+    badge.textContent = String(instance.index + 1).padStart(2, '0')
 
     const shade = document.createElement('span')
     shade.className = 'poster-tile-shade'
@@ -472,39 +678,86 @@ class PosterWall {
     copy.className = 'poster-tile-copy'
     const kicker = document.createElement('span')
     kicker.className = 'poster-tile-kicker'
-    kicker.textContent = tile.key.split('/').slice(0, -1).filter(Boolean).at(-1) || 'R2 / IMAGE'
+    kicker.textContent = metaParts.join(' · ')
     const title = document.createElement('span')
     title.className = 'poster-tile-title'
-    title.textContent = extractFileName(tile.key).replace(/\.[^.]+$/, '')
+    title.textContent = fileName.replace(/\.[^.]+$/, '')
     copy.append(kicker, title)
-    button.append(media, shade, copy)
-    // Pointer activation is handled on pointerup after differentiating a drag.
-    // Keyboard-synthesized clicks have detail=0 and remain fully operable.
+    button.append(media, badge, shade, copy)
+
     button.addEventListener('click', (event) => {
-      if (event.detail === 0) this.#toggle(tile.key)
+      if (event.detail === 0) this.#toggle(instance.instanceId)
+    })
+    button.addEventListener('dblclick', () => {
+      if (this.#firstPressInstanceId !== instance.instanceId) return
+      const target = this.#items[instance.index]
+      if (target) this.#onPreview(target)
     })
     return button
   }
 
-  /** @param {string} key */
-  #toggle(key) {
+  /** @param {string} instanceId */
+  #toggle(instanceId) {
     if (!this.isOpen) return
+    const instance = this.#visibleInstances.get(instanceId) ??
+      (this.#activeInstance?.instanceId === instanceId ? this.#activeInstance : null)
+    if (!instance) return
     const previous = this.#getVisualRects()
-    this.#activeKey = this.#activeKey === key ? null : key
-    this.#positions = focusReflow(this.#layout, this.#activeKey)
-    this.#render(previous)
+    const opening = this.#activeInstance?.instanceId !== instanceId
+    this.#activeInstance = opening ? instance : null
+    this.#focusedInstance = instance
+    this.#expandedRects = layoutExpandedBlock(this.#geometry, this.#items.length, this.#activeInstance)
+    this.#render(previous, opening)
+    if (opening) {
+      const targetRect = this.#expandedRects.get(instanceId) ?? instance
+      this.#panRectIntoView(targetRect)
+      this.#upgradeVisibleImages()
+    }
+  }
+
+  /** @param {number} delta */
+  #stepByIndex(delta) {
+    if (!this.#items.length) return
+    const baseIdx = this.#activeInstance?.index ?? this.#focusedInstance?.index ?? 0
+    const nextIdx = (baseIdx + delta + this.#items.length) % this.#items.length
+    const center = {
+      x: (this.#viewport.clientWidth / 2 - this.#camera.x) / this.#camera.scale,
+      y: (this.#viewport.clientHeight / 2 - this.#camera.y) / this.#camera.scale,
+    }
+    const nextInstance = locateNearestInstance(this.#geometry, this.#items.length, nextIdx, center)
+    if (!nextInstance) return
+    this.#focusAndExpand(nextInstance, true)
+  }
+
+  /** @param {LatticeInstance} instance @param {boolean} [center] */
+  #focusAndExpand(instance, center = true) {
+    const previous = this.#getVisualRects()
+    this.#activeInstance = instance
+    this.#focusedInstance = instance
+    this.#expandedRects = layoutExpandedBlock(this.#geometry, this.#items.length, instance)
+    const targetRect = this.#expandedRects.get(instance.instanceId) ?? instance
+    this.#render(previous, true)
+    this.#panRectIntoView(targetRect, center)
+    const node = this.#nodes.get(instance.instanceId)
+    node?.focus({ preventScroll: true })
+    this.#upgradeVisibleImages()
   }
 
   #updateHud() {
     const count = document.querySelector('#wall-count')
     const zoom = document.querySelector('#wall-zoom-value')
-    if (count) count.textContent = t('wallCount', { count: this.#items.length })
+    if (count) {
+      const base = t('wallCount', { count: this.#items.length })
+      count.textContent = this.#activeInstance
+        ? `${this.#activeInstance.index + 1} / ${this.#items.length} · ${base}`
+        : base
+    }
     if (zoom) zoom.textContent = Math.round(this.#camera.scale * 100) + '%'
   }
 
   /** @param {string} key */
   #imagePriority(key) {
-    const tile = this.#positions.get(key)
+    const tile = this.#expandedRects.get(key) ?? this.#visibleInstances.get(key)
     if (!tile) return Number.POSITIVE_INFINITY
     const { x, y, scale } = this.#camera
     const centerX = (this.#viewport.clientWidth / 2 - x) / scale
@@ -515,15 +768,18 @@ class PosterWall {
     return distance + (onscreen ? 0 : 100000)
   }
 
-  /** @param {import('./poster-wall-layout.js').WallTile} tile @param {HTMLButtonElement} node */
+  /** @param {{key:string,index:number,w:number}} tile @param {HTMLButtonElement} node */
   #enqueueImage(tile, node) {
+    const item = this.#items[tile.index]
+    if (!item) return
     const currentWidth = Number(node.dataset.wallImageWidth || 0)
     const requestedWidth = selectThumbnailWidth(Math.min(640, tile.w * this.#camera.scale),
       window.devicePixelRatio || 1)
     if (currentWidth >= requestedWidth || this.#imageTasks.has(tile.key)) return
     if (Number(node.dataset.wallFailedWidth || 0) === requestedWidth) return
     const task = /** @type {ImageTask} */ ({
-      key: tile.key,
+      key: item.key,
+      instanceId: tile.key,
       node,
       img: /** @type {HTMLImageElement} */ (node.querySelector('.poster-tile-media img:not(.poster-tile-upgrade)')),
       cancel: () => {},
@@ -538,8 +794,6 @@ class PosterWall {
   #scheduleQualityCheck() {
     window.clearTimeout(this.#qualityTimer)
     if (!this.isOpen) return
-    // Waiting until a zoom gesture settles prevents request storms while
-    // crossing the 160/320/480/640px resolution boundaries.
     this.#qualityTimer = window.setTimeout(() => {
       this.#qualityTimer = 0
       this.#upgradeVisibleImages()
@@ -550,31 +804,30 @@ class PosterWall {
     if (!this.isOpen) return
     const visibleBounds = cameraBounds(this.#camera,
       this.#viewport.clientWidth, this.#viewport.clientHeight, 0)
-    for (const [key, node] of this.#nodes) {
-      const tile = this.#tileByKey.get(key)
-      const rect = this.#positions.get(key)
-      if (!tile || !rect || !intersects(rect, visibleBounds)) continue
-      // Do not upgrade a failed/placeholder tile and never prefetch an original
-      // just because a user is zooming the canvas.
+    for (const [instanceId, node] of this.#nodes) {
+      const instance = this.#visibleInstances.get(instanceId)
+      const rect = this.#expandedRects.get(instanceId) ?? instance
+      if (!instance || !rect || !intersects(rect, visibleBounds)) continue
       if (!node.classList.contains('is-loaded')) continue
-      this.#enqueueImage(tile, node)
+      this.#enqueueImage({ ...rect, key: instanceId, index: instance.index }, node)
     }
-    this.#imageQueue.sort((a, b) => this.#imagePriority(a.key) - this.#imagePriority(b.key))
+    this.#imageQueue.sort((a, b) => this.#imagePriority(a.instanceId) - this.#imagePriority(b.instanceId))
     this.#pumpImages()
   }
 
   #pumpImages() {
     while (this.#activeImageLoads < this.#maxImageLoads && this.#imageQueue.length > 0) {
       const task = this.#imageQueue.shift()
-      if (!task || task.stopped || this.#imageTasks.get(task.key) !== task) continue
+      if (!task || task.stopped || this.#imageTasks.get(task.instanceId) !== task) continue
       this.#activeImageLoads++
       task.active = true
       void this.#loadImage(task).finally(() => {
         this.#activeImageLoads--
-        if (this.#imageTasks.get(task.key) === task) this.#imageTasks.delete(task.key)
+        if (this.#imageTasks.get(task.instanceId) === task) this.#imageTasks.delete(task.instanceId)
         if (!task.stopped && task.node.classList.contains('is-loaded')) {
-          const tile = this.#tileByKey.get(task.key)
-          const desired = tile ? selectThumbnailWidth(Math.min(640, tile.w * this.#camera.scale),
+          const instance = this.#visibleInstances.get(task.instanceId)
+          const rect = (instance && (this.#expandedRects.get(task.instanceId) ?? instance))
+          const desired = rect ? selectThumbnailWidth(Math.min(640, rect.w * this.#camera.scale),
             window.devicePixelRatio || 1) : 0
           if (desired > Number(task.node.dataset.wallImageWidth || 0)) this.#scheduleQualityCheck()
         }
@@ -585,10 +838,8 @@ class PosterWall {
 
   /** @param {ImageTask} task */
   async #loadImage(task) {
-    const live = () => !task.stopped && this.isOpen && this.#nodes.get(task.key) === task.node
+    const live = () => !task.stopped && this.isOpen && this.#nodes.get(task.instanceId) === task.node
     if (!live()) return
-    const tile = this.#tileByKey.get(task.key)
-    if (!tile) return
     const desired = task.requestedWidth
     const upgrading = task.node.classList.contains('is-loaded')
     const policy = this.#images.thumbnailPlan(task.key, desired)
@@ -599,8 +850,6 @@ class PosterWall {
     try {
       let success = policy.url ? await this.#attemptImage(task, policy.url, upgrading) : false
       let fromOriginal = false
-      // If a CDN upgrade fails, keep the existing low-res image. Never
-      // trigger an automatic full-size fallback during an upscale.
       if (!success && !upgrading && live() && policy.allowOriginal) {
         const source = await this.#images.originalUrl(task.key)
         if (!live()) return
@@ -627,9 +876,6 @@ class PosterWall {
   }
 
   /**
-   * Preload a higher-resolution image behind the existing tile. Only swap
-   * DOM nodes once the new variant is decoded by the browser. This avoids
-   * flicker, broken placeholders and a second GET for non-cacheable URLs.
    * @param {ImageTask} task
    * @param {string} url
    * @param {boolean} upgrade
@@ -681,18 +927,89 @@ class PosterWall {
     })
   }
 
-  /** @param {string} key */
-  #discardImage(key) {
-    const task = this.#imageTasks.get(key)
+  /** @param {string} instanceId */
+  #discardImage(instanceId) {
+    const task = this.#imageTasks.get(instanceId)
     if (!task) return
     task.stopped = true
     task.cancel()
-    this.#imageTasks.delete(key)
+    this.#imageTasks.delete(instanceId)
   }
 
   #cancelAllImages() {
-    for (const key of this.#imageTasks.keys()) this.#discardImage(key)
+    for (const instanceId of this.#imageTasks.keys()) this.#discardImage(instanceId)
     this.#imageQueue = []
+  }
+
+  /** @param {boolean} [open] */
+  #toggleFinder(open) {
+    const finder = /** @type {HTMLElement|null} */ (document.querySelector('#wall-finder'))
+    const toggle = /** @type {HTMLButtonElement|null} */ (document.querySelector('#wall-search-toggle'))
+    const input = /** @type {HTMLInputElement|null} */ (document.querySelector('#wall-search-input'))
+    if (!finder || !toggle || !input) return
+    const next = open ?? finder.hidden
+    finder.hidden = !next
+    toggle.setAttribute('aria-expanded', String(next))
+    if (next) {
+      input.focus({ preventScroll: true })
+      input.select()
+      this.#refreshFinderMatches(false)
+    }
+  }
+
+  /** @param {boolean} [restoreFocus] */
+  #closeFinder(restoreFocus = true) {
+    const finder = /** @type {HTMLElement|null} */ (document.querySelector('#wall-finder'))
+    const toggle = /** @type {HTMLButtonElement|null} */ (document.querySelector('#wall-search-toggle'))
+    const input = /** @type {HTMLInputElement|null} */ (document.querySelector('#wall-search-input'))
+    const count = document.querySelector('#wall-search-count')
+    if (finder) finder.hidden = true
+    if (toggle) toggle.setAttribute('aria-expanded', 'false')
+    if (input) input.value = ''
+    if (count) count.textContent = ''
+    this.#searchMatches = []
+    this.#searchMatchCursor = 0
+    if (restoreFocus && this.isOpen) this.#viewport.focus({ preventScroll: true })
+  }
+
+  /** @param {boolean} [jump] */
+  #refreshFinderMatches(jump = true) {
+    const input = /** @type {HTMLInputElement|null} */ (document.querySelector('#wall-search-input'))
+    const count = document.querySelector('#wall-search-count')
+    if (!input || !count) return
+    const query = input.value.trim().toLowerCase()
+    if (!query) {
+      this.#searchMatches = []
+      this.#searchMatchCursor = 0
+      count.textContent = ''
+      return
+    }
+    this.#searchMatches = []
+    this.#items.forEach((item, index) => {
+      if (item.key.toLowerCase().includes(query)) this.#searchMatches.push(index)
+    })
+    this.#searchMatchCursor = 0
+    if (!this.#searchMatches.length) {
+      count.textContent = t('wallSearchEmpty')
+      return
+    }
+    count.textContent = `1 / ${this.#searchMatches.length}`
+    if (jump) this.#jumpToFinderMatch(0)
+  }
+
+  /** @param {number} step */
+  #jumpToFinderMatch(step) {
+    if (!this.#searchMatches.length) return
+    this.#searchMatchCursor = (this.#searchMatchCursor + step + this.#searchMatches.length) % this.#searchMatches.length
+    const count = document.querySelector('#wall-search-count')
+    if (count) count.textContent = `${this.#searchMatchCursor + 1} / ${this.#searchMatches.length}`
+    const targetIdx = this.#searchMatches[this.#searchMatchCursor]
+    const center = {
+      x: (this.#viewport.clientWidth / 2 - this.#camera.x) / this.#camera.scale,
+      y: (this.#viewport.clientHeight / 2 - this.#camera.y) / this.#camera.scale,
+    }
+    const inst = locateNearestInstance(this.#geometry, this.#items.length, targetIdx, center)
+    if (inst) this.#focusAndExpand(inst, true)
   }
 
   #bindEvents() {
@@ -703,33 +1020,98 @@ class PosterWall {
     }
     this.#viewport.addEventListener('wheel', (event) => {
       event.preventDefault()
+      this.#cancelCameraMotion()
       const rect = this.#viewport.getBoundingClientRect()
       const x = event.clientX - rect.left
       const y = event.clientY - rect.top
       if (event.shiftKey && !event.ctrlKey) {
+        this.#stopWheelZoom()
         this.#camera.x -= event.deltaY
         this.#camera.y -= event.deltaX
         this.#scheduleRender()
-      } else {
-        const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.0022 : 0.00125))
+        return
+      }
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY) * 1.35 && !event.ctrlKey) {
+        this.#stopWheelZoom()
+        this.#camera.x -= event.deltaX
+        this.#camera.y -= event.deltaY
+        this.#scheduleRender()
+        return
+      }
+      const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.0024 : 0.00135))
+      if (this.#reducedMotion) {
         this.zoom(factor, x, y)
+        return
+      }
+      const currentTarget = this.#wheelZoom?.targetScale ?? this.#camera.scale
+      this.#wheelZoom = {
+        targetScale: Math.min(WALL_MAX_SCALE, Math.max(WALL_MIN_SCALE, currentTarget * factor)),
+        x,
+        y,
+        lastTime: this.#wheelZoom?.lastTime ?? null,
+      }
+      if (!this.#wheelFrame) {
+        const tick = (now) => {
+          const wz = this.#wheelZoom
+          if (!wz || !this.isOpen) { this.#wheelFrame = 0; return }
+          const dt = wz.lastTime === null ? 16 : Math.min(50, Math.max(0, now - wz.lastTime))
+          wz.lastTime = now
+          const alpha = 1 - Math.exp(-dt / 75)
+          const nextScale = this.#camera.scale + (wz.targetScale - this.#camera.scale) * alpha
+          if (Math.abs(wz.targetScale - nextScale) < 0.0015) {
+            this.#camera = zoomAt(this.#camera, wz.x, wz.y, wz.targetScale)
+            this.#wheelFrame = 0
+            this.#wheelZoom = null
+            this.#scheduleRender()
+            return
+          }
+          this.#camera = zoomAt(this.#camera, wz.x, wz.y, nextScale)
+          this.#scheduleRender()
+          this.#wheelFrame = requestAnimationFrame(tick)
+        }
+        this.#wheelFrame = requestAnimationFrame(tick)
       }
     }, { passive: false })
-    // Controls live outside the viewport, so keyboard shortcuts must be scoped
-    // to the entire presentation (including focused action buttons).
+
     this.#root.addEventListener('keydown', (event) => this.#keyDown(event))
-    const onClick = (id, cb) => document.querySelector('#' + id).addEventListener('click', cb)
+    const onClick = (id, cb) => document.querySelector('#' + id)?.addEventListener('click', cb)
     onClick('wall-close', () => this.close())
     onClick('wall-zoom-in', () => this.zoom(1.23, undefined, undefined, true))
     onClick('wall-zoom-out', () => this.zoom(1 / 1.23, undefined, undefined, true))
     onClick('wall-reset', () => this.resetCamera(true))
+    onClick('wall-prev', () => this.#stepByIndex(-1))
+    onClick('wall-next', () => this.#stepByIndex(1))
     onClick('wall-collapse', () => {
-      if (this.#activeKey) this.#toggle(this.#activeKey)
+      if (this.#activeInstance) this.#toggle(this.#activeInstance.instanceId)
       this.#viewport.focus({ preventScroll: true })
     })
     onClick('wall-preview', () => {
-      const item = this.#items.find((entry) => entry.key === this.#activeKey)
+      const item = this.#activeInstance ? this.#items[this.#activeInstance.index] : null
       if (item) this.#onPreview(item)
+    })
+    onClick('wall-copy-url', () => {
+      const item = this.#activeInstance ? this.#items[this.#activeInstance.index] : null
+      if (item && this.#onCopyUrl) this.#onCopyUrl(item)
+    })
+    onClick('wall-download', () => {
+      const item = this.#activeInstance ? this.#items[this.#activeInstance.index] : null
+      if (item && this.#onDownload) this.#onDownload(item)
+    })
+    onClick('wall-search-toggle', () => this.#toggleFinder())
+    onClick('wall-search-prev', () => this.#jumpToFinderMatch(-1))
+    onClick('wall-search-next', () => this.#jumpToFinderMatch(1))
+    const searchInput = /** @type {HTMLInputElement|null} */ (document.querySelector('#wall-search-input'))
+    searchInput?.addEventListener('input', () => this.#refreshFinderMatches(true))
+    searchInput?.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        event.stopPropagation()
+        this.#jumpToFinderMatch(event.shiftKey ? -1 : 1)
+      } else if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        this.#closeFinder(true)
+      }
     })
     onClick('wall-load-more', async () => {
       const button = /** @type {HTMLButtonElement} */ (document.querySelector('#wall-load-more'))
@@ -747,20 +1129,29 @@ class PosterWall {
   #pointerDown(event) {
     if (event.pointerType === 'mouse' && event.button !== 0) return
     this.#cancelCameraMotion()
+    this.#stopWheelZoom()
     this.#viewport.setPointerCapture(event.pointerId)
     this.#pointers.set(event.pointerId, {
-      x: event.clientX, y: event.clientY,
-      originX: event.clientX, originY: event.clientY,
+      x: event.clientX,
+      y: event.clientY,
+      originX: event.clientX,
+      originY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      lastTime: event.timeStamp,
+      vx: 0,
+      vy: 0,
     })
-    // A second finger is a new gesture; do not allow either contact to
-    // synthesize a tile click when it leaves the screen.
     if (this.#pointers.size === 1) {
       this.#dragged = false
       this.#gestureUsedPinch = false
     }
-    this.#pointerTile = this.#pointers.size === 1
-      ? /** @type {HTMLElement|null} */ (event.target instanceof Element ? event.target.closest('.poster-tile') : null)?.dataset.key ?? null
-      : null
+    const tile = event.target instanceof Element ? event.target.closest('.poster-tile') : null
+    const instanceId = tile instanceof HTMLElement ? (tile.dataset.instanceId ?? null) : null
+    this.#pointerTile = this.#pointers.size === 1 ? instanceId : null
+    if (this.#pointers.size === 1 && event.detail === 1) {
+      this.#firstPressInstanceId = instanceId
+    }
     if (this.#pointers.size >= 2) {
       this.#gestureUsedPinch = true
       this.#dragged = true
@@ -786,12 +1177,19 @@ class PosterWall {
     if (!pointer) return
     const dx = event.clientX - pointer.x
     const dy = event.clientY - pointer.y
+    const dt = event.timeStamp - pointer.lastTime
+    if (dt > 0) {
+      pointer.vx = ((event.clientX - pointer.lastX) / dt) * 1000
+      pointer.vy = ((event.clientY - pointer.lastY) / dt) * 1000
+    }
+    pointer.lastX = event.clientX
+    pointer.lastY = event.clientY
+    pointer.lastTime = event.timeStamp
     pointer.x = event.clientX
     pointer.y = event.clientY
     const totalX = pointer.x - pointer.originX
     const totalY = pointer.y - pointer.originY
     if (this.#pointers.size === 1 && !this.#dragged) {
-      // Keep small finger jitter a click. Only start panning after 7px.
       if (Math.hypot(totalX, totalY) < 7) return
       this.#dragged = true
       this.#pointerTile = null
@@ -829,12 +1227,17 @@ class PosterWall {
     if (!pointer) return
     const pick = !this.#dragged && !this.#gestureUsedPinch &&
       this.#pointers.size === 1 ? this.#pointerTile : null
+    const shouldCoast = event.type === 'pointerup' &&
+      this.#dragged &&
+      !this.#gestureUsedPinch &&
+      this.#pointers.size === 1 &&
+      (event.timeStamp - pointer.lastTime) <= INERTIA.staleReleaseMs
+    const vx = pointer.vx
+    const vy = pointer.vy
     this.#pointers.delete(event.pointerId)
     if (this.#pointers.size < 2) {
       this.#pinchDistance = 0
       for (const remaining of this.#pointers.values()) {
-        // Do not apply the old finger's entire movement as a pan offset
-        // when one finger stays down after pinching.
         remaining.originX = remaining.x
         remaining.originY = remaining.y
       }
@@ -846,28 +1249,100 @@ class PosterWall {
       this.#gestureUsedPinch = false
     }
     if (pick && event.type === 'pointerup') this.#toggle(pick)
+    else if (shouldCoast) {
+      this.#animateInertia(vx, vy)
+    }
   }
 
   /** @param {KeyboardEvent} event */
   #keyDown(event) {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+      event.preventDefault()
+      this.#toggleFinder(true)
+      return
+    }
     if (event.altKey || event.ctrlKey || event.metaKey) return
-    const step = event.shiftKey ? 170 : 86
+    const target = event.target instanceof Element ? event.target : null
+    const inInput = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA'
+    if (inInput) return
+
+    const arrows = /** @type {Record<string, 'left'|'right'|'up'|'down'>} */ ({
+      ArrowLeft: 'left',
+      ArrowRight: 'right',
+      ArrowUp: 'up',
+      ArrowDown: 'down',
+    })
     let used = true
     if (event.key === 'Escape') {
-      if (this.#activeKey) this.#toggle(this.#activeKey)
-      else this.close()
-    } else if (event.key === 'ArrowLeft') this.#camera.x += step
-    else if (event.key === 'ArrowRight') this.#camera.x -= step
-    else if (event.key === 'ArrowUp') this.#camera.y += step
-    else if (event.key === 'ArrowDown') this.#camera.y -= step
-    else if (event.key === '+' || event.key === '=') this.zoom(1.23)
-    else if (event.key === '-') this.zoom(1 / 1.23)
-    else if (event.key === '0' || event.key === 'Home') this.resetCamera()
-    else used = false
-    if (used) {
-      event.preventDefault()
-      this.#scheduleRender()
+      const finder = document.querySelector('#wall-finder')
+      if (finder && !finder.hidden) this.#closeFinder(true)
+      else if (this.#activeInstance) this.#toggle(this.#activeInstance.instanceId)
+      else if (this.#focusedInstance) {
+        this.#focusedInstance = null
+        this.#scheduleRender()
+      } else this.close()
+    } else if (event.key === '/') {
+      this.#toggleFinder(true)
+    } else if (arrows[event.key]) {
+      if (event.shiftKey) {
+        const step = 170
+        if (event.key === 'ArrowLeft') this.#camera.x += step
+        else if (event.key === 'ArrowRight') this.#camera.x -= step
+        else if (event.key === 'ArrowUp') this.#camera.y += step
+        else if (event.key === 'ArrowDown') this.#camera.y -= step
+        this.#scheduleRender()
+      } else {
+        this.#moveFocus(arrows[event.key])
+      }
+    } else if (event.key === ' ' && this.#focusedInstance && target?.tagName !== 'BUTTON') {
+      this.#toggle(this.#focusedInstance.instanceId)
+    } else if (event.key === 'Enter' && target?.tagName !== 'BUTTON') {
+      if (this.#activeInstance) {
+        const item = this.#items[this.#activeInstance.index]
+        if (item) this.#onPreview(item)
+      } else if (this.#focusedInstance) {
+        this.#toggle(this.#focusedInstance.instanceId)
+      }
+    } else if (event.key === '[' || event.key === 'PageUp') {
+      this.#stepByIndex(-1)
+    } else if (event.key === ']' || event.key === 'PageDown') {
+      this.#stepByIndex(1)
+    } else if (event.key === '+' || event.key === '=') {
+      this.zoom(1.23, undefined, undefined, true)
+    } else if (event.key === '-') {
+      this.zoom(1 / 1.23, undefined, undefined, true)
+    } else if (event.key === '0' || event.key === 'Home') {
+      this.resetCamera(true)
+    } else {
+      used = false
     }
+    if (used) event.preventDefault()
+  }
+
+  /** @param {'up'|'down'|'left'|'right'} direction */
+  #moveFocus(direction) {
+    if (!this.#items.length) return
+    const current = this.#focusedInstance ?? this.#activeInstance
+    const center = {
+      x: (this.#viewport.clientWidth / 2 - this.#camera.x) / this.#camera.scale,
+      y: (this.#viewport.clientHeight / 2 - this.#camera.y) / this.#camera.scale,
+    }
+    const seed = current ?? findNearestInstance([...this.#visibleInstances.values()], center)
+    if (!seed) return
+    const next = current
+      ? pickAdjacentInstance(
+          seed,
+          direction,
+          locateStepCandidates(this.#geometry, this.#items.length, seed),
+          this.#expandedRects,
+        )
+      : seed
+    if (!next) return
+    this.#focusedInstance = next
+    const rect = this.#expandedRects.get(next.instanceId) ?? next
+    this.#render()
+    this.#panRectIntoView(rect)
+    this.#nodes.get(next.instanceId)?.focus({ preventScroll: true })
   }
 }
 

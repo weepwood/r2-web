@@ -68,6 +68,8 @@ class App {
       onPreview: (item) => this.#openPreview({
         key: item.key, size: item.size ?? 0, lastModified: Number(item.lastModified ?? 0),
       }),
+      onCopyUrl: (item) => void this.#ops?.copyAs(item.key, 'url'),
+      onDownload: (item) => void this.#ops?.download(item.key),
       onLoadMore: async () => { await this.#explorer?.loadMore() },
       onClose: () => {
         $('#view-wall-btn').setAttribute('aria-pressed', 'false')

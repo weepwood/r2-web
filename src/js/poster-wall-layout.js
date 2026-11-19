@@ -1,3 +1,11 @@
+import {
+  BLOCK_COLS,
+  BLOCK_ROWS,
+  SLOTS_PER_BLOCK,
+  getBlockReflow,
+  getBlockTemplate,
+} from './poster-wall-blocks.js'
+
 /**
  * Original, deterministic rectilinear mosaic geometry. Each 6 × 4 motif is an
  * exact cover of its cells. Motifs repeat in two dimensions; no masonry,
@@ -7,6 +15,10 @@ export const WALL_CELL = 164
 export const WALL_GAP = 6
 export const WALL_MIN_SCALE = 0.35
 export const WALL_MAX_SCALE = 2.8
+export const LATTICE_CELL = 128
+export const LATTICE_GAP = 8
+export const MAX_RENDERED_INSTANCES = 400
+const FIELD_ASPECT = 2.2
 
 // Tuples: [column, row, columns-wide, rows-high]. Total area = 24 per motif.
 export const WALL_MOTIFS = Object.freeze([
@@ -204,4 +216,306 @@ export function focusReflow(layout, activeKey) {
     placed.push(next)
   }
   return positions
+}
+
+/* --------------------------------------------------------------------------
+ * Infinite Repeating Lattice Engine (12×8 blocks, 4 variants × 4 reflections,
+ * zero-cascade in-block 6×6 expansion, and directional focus navigation).
+ * -------------------------------------------------------------------------- */
+
+/**
+ * @typedef {{
+ *   instanceId: string,
+ *   index: number,
+ *   cellSlot: number,
+ *   repeatX: number,
+ *   repeatY: number,
+ *   x: number,
+ *   y: number,
+ *   w: number,
+ *   h: number,
+ * }} LatticeInstance
+ */
+
+/**
+ * @typedef {{
+ *   blocksPerRow: number,
+ *   blockRows: number,
+ *   cellSlots: number,
+ *   cellWidth: number,
+ *   cellHeight: number,
+ *   blockWidth: number,
+ *   blockHeight: number,
+ *   cell: number,
+ *   gap: number,
+ * }} LatticeGeometry
+ */
+
+/**
+ * @param {number} totalEntries
+ * @param {{cell?:number, gap?:number}} [metrics]
+ * @returns {LatticeGeometry}
+ */
+export function getLatticeGeometry(totalEntries, metrics = {}) {
+  const cell = metrics.cell ?? LATTICE_CELL
+  const gap = metrics.gap ?? LATTICE_GAP
+  const pitch = cell + gap
+  const blockWidth = BLOCK_COLS * pitch
+  const blockHeight = BLOCK_ROWS * pitch
+  const blocks = Math.max(1, Math.ceil(Math.max(0, totalEntries) / SLOTS_PER_BLOCK))
+  const blocksPerRow = blocks <= 1
+    ? 1
+    : Math.max(1, Math.round(Math.sqrt((FIELD_ASPECT * blocks * BLOCK_ROWS) / BLOCK_COLS)))
+  const blockRows = Math.ceil(blocks / blocksPerRow)
+  return {
+    blocksPerRow,
+    blockRows,
+    cellSlots: blocksPerRow * blockRows * SLOTS_PER_BLOCK,
+    cellWidth: blocksPerRow * blockWidth,
+    cellHeight: blockRows * blockHeight,
+    blockWidth,
+    blockHeight,
+    cell,
+    gap,
+  }
+}
+
+/**
+ * @param {LatticeGeometry} geometry
+ * @param {number} totalEntries
+ * @param {number} absoluteColumn
+ * @param {number} absoluteRow
+ * @param {number} slotIndex
+ * @returns {LatticeInstance}
+ */
+function buildInstance(geometry, totalEntries, absoluteColumn, absoluteRow, slotIndex) {
+  const repeatX = Math.floor(absoluteColumn / geometry.blocksPerRow)
+  const repeatY = Math.floor(absoluteRow / geometry.blockRows)
+  const localColumn = absoluteColumn - repeatX * geometry.blocksPerRow
+  const localRow = absoluteRow - repeatY * geometry.blockRows
+  const cellSlot = (localRow * geometry.blocksPerRow + localColumn) * SLOTS_PER_BLOCK + slotIndex
+  const slot = getBlockTemplate(localColumn, localRow)[slotIndex]
+  const pitch = geometry.cell + geometry.gap
+  return {
+    instanceId: `${cellSlot}:${repeatX}:${repeatY}`,
+    index: cellSlot % totalEntries,
+    cellSlot,
+    repeatX,
+    repeatY,
+    x: repeatX * geometry.cellWidth + localColumn * geometry.blockWidth + slot.x * pitch,
+    y: repeatY * geometry.cellHeight + localRow * geometry.blockHeight + slot.y * pitch,
+    w: slot.cols * pitch - geometry.gap,
+    h: slot.rows * pitch - geometry.gap,
+  }
+}
+
+/**
+ * @param {LatticeGeometry} geometry
+ * @param {LatticeInstance} instance
+ */
+export function getInstanceBlock(geometry, instance) {
+  const blockInCell = Math.floor(instance.cellSlot / SLOTS_PER_BLOCK)
+  return {
+    column: instance.repeatX * geometry.blocksPerRow + (blockInCell % geometry.blocksPerRow),
+    row: instance.repeatY * geometry.blockRows + Math.floor(blockInCell / geometry.blocksPerRow),
+    slotIndex: instance.cellSlot % SLOTS_PER_BLOCK,
+  }
+}
+
+/**
+ * @param {LatticeGeometry} geometry
+ * @param {number} totalEntries
+ * @param {{x:number,y:number,w:number,h:number}} bounds
+ * @param {number} [overscan]
+ * @returns {LatticeInstance[]}
+ */
+export function layoutLattice(geometry, totalEntries, bounds, overscan = 0) {
+  if (totalEntries <= 0 || geometry.blockWidth <= 0 || geometry.blockHeight <= 0) return []
+  const view = {
+    x: bounds.x - overscan,
+    y: bounds.y - overscan,
+    w: bounds.w + overscan * 2,
+    h: bounds.h + overscan * 2,
+  }
+  const fromColumn = Math.floor(view.x / geometry.blockWidth)
+  const toColumn = Math.floor((view.x + view.w) / geometry.blockWidth)
+  const fromRow = Math.floor(view.y / geometry.blockHeight)
+  const toRow = Math.floor((view.y + view.h) / geometry.blockHeight)
+  /** @type {LatticeInstance[]} */
+  const result = []
+  for (let row = fromRow; row <= toRow; row++) {
+    for (let column = fromColumn; column <= toColumn; column++) {
+      for (let slotIndex = 0; slotIndex < SLOTS_PER_BLOCK; slotIndex++) {
+        const instance = buildInstance(geometry, totalEntries, column, row, slotIndex)
+        if (!intersects(instance, view)) continue
+        result.push(instance)
+        if (result.length >= MAX_RENDERED_INSTANCES) return result
+      }
+    }
+  }
+  return result
+}
+
+/**
+ * Zero-cascade expansion: only the 12 tiles inside the active tile's block re-gear.
+ * @param {LatticeGeometry} geometry
+ * @param {number} totalEntries
+ * @param {LatticeInstance | null} active
+ * @returns {Map<string,{x:number,y:number,w:number,h:number}>}
+ */
+export function layoutExpandedBlock(geometry, totalEntries, active) {
+  /** @type {Map<string,{x:number,y:number,w:number,h:number}>} */
+  const result = new Map()
+  if (!active || totalEntries <= 0) return result
+  const block = getInstanceBlock(geometry, active)
+  const localColumn = block.column - active.repeatX * geometry.blocksPerRow
+  const localRow = block.row - active.repeatY * geometry.blockRows
+  const reflow = getBlockReflow(localColumn, localRow, block.slotIndex)
+  if (!reflow) return result
+  const pitch = geometry.cell + geometry.gap
+  const originX = active.repeatX * geometry.cellWidth + localColumn * geometry.blockWidth
+  const originY = active.repeatY * geometry.cellHeight + localRow * geometry.blockHeight
+  const blockInCell = localRow * geometry.blocksPerRow + localColumn
+  for (let slotIndex = 0; slotIndex < SLOTS_PER_BLOCK; slotIndex++) {
+    const slot = reflow[slotIndex]
+    const cellSlot = blockInCell * SLOTS_PER_BLOCK + slotIndex
+    result.set(`${cellSlot}:${active.repeatX}:${active.repeatY}`, {
+      x: originX + slot.x * pitch,
+      y: originY + slot.y * pitch,
+      w: slot.cols * pitch - geometry.gap,
+      h: slot.rows * pitch - geometry.gap,
+    })
+  }
+  return result
+}
+
+/**
+ * Closest repeat instance of item `index` to a world coordinate.
+ * @param {LatticeGeometry} geometry
+ * @param {number} totalEntries
+ * @param {number} index
+ * @param {{x:number,y:number}} point
+ * @returns {LatticeInstance | null}
+ */
+export function locateNearestInstance(geometry, totalEntries, index, point) {
+  if (totalEntries <= 0 || index < 0 || index >= totalEntries) return null
+  let best = null
+  let bestDistance = Number.POSITIVE_INFINITY
+  for (let cellSlot = index; cellSlot < geometry.cellSlots; cellSlot += totalEntries) {
+    const blockInCell = Math.floor(cellSlot / SLOTS_PER_BLOCK)
+    const localColumn = blockInCell % geometry.blocksPerRow
+    const localRow = Math.floor(blockInCell / geometry.blocksPerRow)
+    const slotIndex = cellSlot % SLOTS_PER_BLOCK
+    const base = buildInstance(geometry, totalEntries, localColumn, localRow, slotIndex)
+    const repeatX = Math.round((point.x - base.x - base.w / 2) / geometry.cellWidth)
+    const repeatY = Math.round((point.y - base.y - base.h / 2) / geometry.cellHeight)
+    const candidate = buildInstance(
+      geometry,
+      totalEntries,
+      repeatX * geometry.blocksPerRow + localColumn,
+      repeatY * geometry.blockRows + localRow,
+      slotIndex,
+    )
+    const dx = candidate.x + candidate.w / 2 - point.x
+    const dy = candidate.y + candidate.h / 2 - point.y
+    const distance = dx * dx + dy * dy
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = candidate
+    }
+  }
+  return best
+}
+
+/**
+ * Candidate instances in the 3x3 blocks around `from` for arrow-key traversal.
+ * @param {LatticeGeometry} geometry
+ * @param {number} totalEntries
+ * @param {LatticeInstance} from
+ * @returns {LatticeInstance[]}
+ */
+export function locateStepCandidates(geometry, totalEntries, from) {
+  if (totalEntries <= 0) return []
+  const origin = getInstanceBlock(geometry, from)
+  /** @type {LatticeInstance[]} */
+  const candidates = []
+  for (let row = origin.row - 1; row <= origin.row + 1; row++) {
+    for (let column = origin.column - 1; column <= origin.column + 1; column++) {
+      for (let slotIndex = 0; slotIndex < SLOTS_PER_BLOCK; slotIndex++) {
+        candidates.push(buildInstance(geometry, totalEntries, column, row, slotIndex))
+      }
+    }
+  }
+  return candidates
+}
+
+const AXES = {
+  right: { along: 'x', cross: 'y', alongSize: 'w', crossSize: 'h', sign: 1 },
+  left: { along: 'x', cross: 'y', alongSize: 'w', crossSize: 'h', sign: -1 },
+  down: { along: 'y', cross: 'x', alongSize: 'h', crossSize: 'w', sign: 1 },
+  up: { along: 'y', cross: 'x', alongSize: 'h', crossSize: 'w', sign: -1 },
+}
+
+/**
+ * @param {LatticeInstance} from
+ * @param {'up'|'down'|'left'|'right'} direction
+ * @param {LatticeInstance[]} candidates
+ * @param {Map<string,{x:number,y:number,w:number,h:number}>} [rendered]
+ * @param {number} [missPenalty]
+ * @returns {LatticeInstance | null}
+ */
+export function pickAdjacentInstance(from, direction, candidates, rendered, missPenalty = LATTICE_CELL + LATTICE_GAP) {
+  const axis = AXES[direction]
+  const drawn = (inst) => {
+    const override = rendered?.get(inst.instanceId)
+    return override ? { ...inst, ...override } : inst
+  }
+  const source = drawn(from)
+  let best = null
+  let bestScore = Number.POSITIVE_INFINITY
+  let bestCross = Number.POSITIVE_INFINITY
+
+  for (const base of candidates) {
+    if (base.instanceId === from.instanceId) continue
+    const rect = drawn(base)
+    const step = axis.sign === 1
+      ? rect[axis.along] - (source[axis.along] + source[axis.alongSize])
+      : source[axis.along] - (rect[axis.along] + rect[axis.alongSize])
+    if (step < 0) continue
+
+    const aStart = source[axis.cross]
+    const bStart = rect[axis.cross]
+    const overlap = Math.min(aStart + source[axis.crossSize], bStart + rect[axis.crossSize]) - Math.max(aStart, bStart)
+    const score = step + (overlap > 0 ? 0 : -overlap * 2 + missPenalty)
+    const crossDelta = Math.abs(
+      (rect[axis.cross] + rect[axis.crossSize] / 2) - (source[axis.cross] + source[axis.crossSize] / 2),
+    )
+    if (score < bestScore || (score === bestScore && crossDelta < bestCross)) {
+      bestScore = score
+      bestCross = crossDelta
+      best = base
+    }
+  }
+  return best
+}
+
+/**
+ * @template {{x:number,y:number,w:number,h:number}} T
+ * @param {readonly T[]} instances
+ * @param {{x:number,y:number}} point
+ * @returns {T | null}
+ */
+export function findNearestInstance(instances, point) {
+  let best = null
+  let bestDistance = Number.POSITIVE_INFINITY
+  for (const instance of instances) {
+    const dx = instance.x + instance.w / 2 - point.x
+    const dy = instance.y + instance.h / 2 - point.y
+    const distance = dx * dx + dy * dy
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = instance
+    }
+  }
+  return best
 }

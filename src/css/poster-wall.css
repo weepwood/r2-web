@@ -64,8 +64,46 @@
   box-shadow: none;
   -webkit-tap-highlight-color: transparent;
 }
-.poster-tile:focus-visible { outline: 2px solid #f7f4ee; outline-offset: -2px; }
+.poster-tile:focus-visible,
+.poster-tile.is-focused { outline: 2px solid #f7f4ee; outline-offset: -2px; }
 .poster-tile.is-active { box-shadow: 0 0 0 1px rgb(247 244 238 / 28%), 0 10px 32px rgb(0 0 0 / 22%); }
+.poster-tile.is-entering {
+  animation: poster-tile-enter 420ms cubic-bezier(.22, 1, .36, 1) both;
+  animation-delay: var(--wall-enter-delay, 0ms);
+}
+@keyframes poster-tile-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+.poster-tile-badge {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  z-index: 3;
+  padding: 3px 8px;
+  border: 1px solid rgb(247 244 238 / 16%);
+  border-radius: 999px;
+  background: rgb(10 10 10 / 68%);
+  color: rgb(247 244 238 / 84%);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .06em;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 160ms ease, transform 200ms cubic-bezier(.2,.75,.3,1);
+}
+.poster-tile:is(:hover, :focus-visible, .is-focused, .is-active) .poster-tile-badge {
+  opacity: 1;
+  transform: translateY(0);
+}
 .poster-tile-media, .poster-tile-shade, .poster-tile-copy { position: absolute; inset: 0; }
 
 .poster-tile-media {
@@ -157,26 +195,30 @@
   transform: translateY(9px);
 }
 .poster-tile.is-compact .poster-tile-shade { opacity: 0; }
-.poster-tile:is(:hover, :focus-visible, .is-active) .poster-tile-copy {
+.poster-tile:is(:hover, :focus-visible, .is-active) .poster-tile-copy,
+.poster-tile.is-focused .poster-tile-copy {
   opacity: 1;
   transform: translateY(0);
 }
-.poster-tile:is(:hover, :focus-visible, .is-active) .poster-tile-shade { opacity: 1; }
+.poster-tile:is(:hover, :focus-visible, .is-active) .poster-tile-shade,
+.poster-tile.is-focused .poster-tile-shade { opacity: 1; }
 .poster-tile.is-compact .poster-tile-title { font-size: 19px; }
 .poster-tile.is-active .poster-tile-title { font-size: clamp(27px, 2.7vw, 42px); line-height: 1.04; }
 .poster-tile.is-active .poster-tile-kicker { display: block; }
 .poster-tile.is-active .poster-tile-copy { padding: 18px clamp(18px, 2.2vw, 34px) 30px; }
 
 /* Zoom-aware editorial restraint: overview is an image map, not a label wall. */
-.poster-wall[data-zoom-level='overview'] .poster-tile:not(.is-active):not(:hover):not(:focus-visible) .poster-tile-copy {
+.poster-wall[data-zoom-level='overview'] .poster-tile:not(.is-active):not(.is-focused):not(:hover):not(:focus-visible) .poster-tile-copy {
   opacity: 0;
   transform: translateY(6px);
 }
-.poster-wall[data-zoom-level='overview'] .poster-tile:not(.is-active):not(:hover):not(:focus-visible) .poster-tile-shade {
+.poster-wall[data-zoom-level='overview'] .poster-tile:not(.is-active):not(.is-focused):not(:hover):not(:focus-visible) .poster-tile-shade {
   opacity: 0;
 }
 .poster-wall[data-zoom-level='overview'] .poster-tile:is(:hover, :focus-visible, .is-active) .poster-tile-copy,
-.poster-wall[data-zoom-level='overview'] .poster-tile:is(:hover, :focus-visible, .is-active) .poster-tile-shade {
+.poster-wall[data-zoom-level='overview'] .poster-tile:is(:hover, :focus-visible, .is-active) .poster-tile-shade,
+.poster-wall[data-zoom-level='overview'] .poster-tile.is-focused .poster-tile-copy,
+.poster-wall[data-zoom-level='overview'] .poster-tile.is-focused .poster-tile-shade {
   opacity: 1;
 }
 
@@ -185,7 +227,7 @@
   filter: brightness(.63) saturate(.76);
   transition: filter 190ms ease;
 }
-.poster-wall.has-active .poster-tile:not(.is-active):is(:hover, :focus-visible) {
+.poster-wall.has-active .poster-tile:not(.is-active):is(:hover, :focus-visible, .is-focused) {
   filter: brightness(.88) saturate(1);
 }
 
@@ -247,6 +289,57 @@
   gap: 8px;
 }
 .poster-wall-controls-bottom { top: auto; bottom: 20px; }
+.poster-wall-finder {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 39px;
+  padding: 0 6px 0 12px;
+  border: 1px solid rgb(247 244 238 / 18%);
+  border-radius: 999px;
+  background: rgb(15 15 15 / 86%);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+.poster-wall-finder input {
+  width: min(190px, 34vw);
+  border: 0;
+  background: transparent;
+  color: var(--wall-ink);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.poster-wall-finder input::placeholder {
+  color: rgb(247 244 238 / 44%);
+}
+.poster-wall-finder-count {
+  color: rgb(247 244 238 / 60%);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding: 0 4px;
+}
+.poster-wall-finder-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: rgb(247 244 238 / 78%);
+  cursor: pointer;
+}
+.poster-wall-finder-btn:hover {
+  background: rgb(247 244 238 / 12%);
+  color: var(--wall-ink);
+}
+.poster-wall-finder-btn svg {
+  width: 14px;
+  height: 14px;
+}
 .poster-wall-fab {
   display: grid;
   place-items: center;
@@ -278,14 +371,29 @@
   top: 0;
   left: 0;
   display: flex;
-  gap: 7px;
-  white-space: nowrap;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100vw - 28px);
   transition: opacity 140ms ease;
+}
+.poster-wall-focus-actions.is-revealing {
+  animation: poster-actions-reveal 240ms cubic-bezier(.22, 1, .36, 1) 140ms both;
+}
+@keyframes poster-actions-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .poster-wall-action {
   pointer-events: auto;
-  min-height: 38px;
-  padding: 0 16px;
+  min-height: 36px;
+  padding: 0 14px;
   border: 1px solid rgb(247 244 238 / 16%);
   border-radius: 999px;
   color: rgb(247 244 238 / 88%);
@@ -295,6 +403,16 @@
   font-weight: 570;
   letter-spacing: .01em;
   transition: background 150ms ease, border-color 150ms ease;
+}
+.poster-wall-action-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  padding: 0;
+}
+.poster-wall-action-icon svg {
+  width: 15px;
+  height: 15px;
 }
 .poster-wall-action:is(:hover, :focus-visible) {
   background: rgb(43 43 43 / 94%);
