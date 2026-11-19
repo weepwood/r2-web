@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const read = (path) => readFileSync(new URL('../' + path, import.meta.url), 'utf8')
@@ -103,4 +103,50 @@ test('dropdown selects, secret toggle icons, folder card bounds and detail fixes
   assert.match(refinementsCss, /\[data-view='gallery'\] \.file-card\[data-is-folder='true'\]/)
   assert.match(refinementsCss, /#preview-dialog #preview-body img[\s\S]*width:\s*auto;\s*height:\s*auto;/)
   assert.doesNotMatch(html, /id="view-(?:gallery|wall)-btn"[^>]*\btitle=/)
+})
+
+test('all ESM named imports across src/ resolve to real exports or importmap entries', () => {
+  const importMapMatch = html.match(/<script type="importmap">\s*([\s\S]*?)<\/script>/)
+  assert.ok(importMapMatch, 'importmap script block must exist')
+  const importMap = JSON.parse(importMapMatch[1]).imports
+  const jsFiles = readdirSync(new URL('../src/js', import.meta.url)).filter((f) => f.endsWith('.js'))
+  const exportsMap = new Map()
+
+  for (const file of jsFiles) {
+    const code = read(`src/js/${file}`)
+    const exported = new Set()
+    for (const m of code.matchAll(/export\s+(?:async\s+)?(?:function\*?|const|let|var|class)\s+([A-Za-z_$][\w$]*)/g)) {
+      exported.add(m[1])
+    }
+    for (const m of code.matchAll(/export\s*\{([^}]+)\}/g)) {
+      for (const part of m[1].split(',')) {
+        const cleaned = part.trim()
+        if (!cleaned) continue
+        const asMatch = cleaned.match(/\bas\s+([A-Za-z_$][\w$]*)$/)
+        exported.add(asMatch ? asMatch[1] : cleaned)
+      }
+    }
+    exportsMap.set(`./${file}`, exported)
+  }
+
+  for (const rel of ['src/main.js', ...jsFiles.map((f) => `src/js/${f}`)]) {
+    const code = read(rel)
+    for (const m of code.matchAll(/import\s*(?:\{([^}]+)\}|([A-Za-z_$][\w$]*))\s*from\s*["']([^"']+)["']/g)) {
+      const spec = m[3]
+      if (!spec.startsWith('.')) {
+        assert.ok(importMap[spec], `${rel} imports unmapped package "${spec}"`)
+        continue
+      }
+      const key = rel === 'src/main.js' ? spec.replace('./js/', './') : spec
+      const avail = exportsMap.get(key)
+      assert.ok(avail, `${rel} imports missing module "${spec}"`)
+      if (m[1]) {
+        for (const part of m[1].split(',')) {
+          const cleaned = part.trim().replace(/\s+as\s+.*$/, '')
+          if (!cleaned) continue
+          assert.ok(avail.has(cleaned), `${rel} imports missing export "${cleaned}" from "${spec}"`)
+        }
+      }
+    }
+  }
 })

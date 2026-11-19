@@ -1,6 +1,7 @@
+import { filesize } from 'filesize'
 import { selectThumbnailWidth } from './thumbnail-utils.js'
 import { ImageAssetService } from './image-asset-service.js'
-import { extractFileName, formatBytes } from './utils.js'
+import { extractFileName } from './utils.js'
 import { t } from './i18n.js'
 import {
   LATTICE_CELL,
@@ -647,7 +648,7 @@ class PosterWall {
     const fileName = extractFileName(item.key)
     const ext = fileName.includes('.') ? fileName.split('.').pop().toUpperCase() : 'IMAGE'
     const folder = item.key.split('/').slice(0, -1).filter(Boolean).at(-1)
-    const metaParts = [folder || 'R2', item.size ? formatBytes(item.size) : null, ext].filter(Boolean)
+    const metaParts = [folder || 'R2', item.size ? filesize(item.size) : null, ext].filter(Boolean)
 
     const button = document.createElement('button')
     button.type = 'button'
