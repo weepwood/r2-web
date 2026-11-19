@@ -226,7 +226,22 @@ class FilePreview {
               footer.appendChild(dim)
               if (img.naturalWidth > body.clientWidth || img.naturalHeight > body.clientHeight) {
                 img.classList.add('is-zoomable')
-                img.addEventListener('click', () => img.classList.toggle('is-zoomed'))
+                const zoomPill = document.createElement('button')
+                zoomPill.type = 'button'
+                zoomPill.className = 'preview-zoom-pill'
+                const syncZoom = () => {
+                  const zoomed = img.classList.contains('is-zoomed')
+                  zoomPill.textContent = zoomed ? '100%' : 'Fit'
+                  zoomPill.setAttribute('aria-pressed', String(zoomed))
+                }
+                const toggleZoom = () => {
+                  img.classList.toggle('is-zoomed')
+                  syncZoom()
+                }
+                syncZoom()
+                img.addEventListener('click', toggleZoom)
+                zoomPill.addEventListener('click', toggleZoom)
+                footer.appendChild(zoomPill)
               }
             }
           }

@@ -283,34 +283,205 @@ dialog > .dialog-panel {
 
 /* Inspector is a document-reading surface, not a second hero image. */
 #app .details-panel {
-  flex-basis: 316px;
-  max-width: 316px;
-  box-shadow: none;
+  flex-basis: 324px;
+  max-width: 324px;
+  border-left: 1px solid var(--border);
+  box-shadow: -10px 0 32px color-mix(in srgb, black 4%, transparent);
+  transition: opacity 180ms var(--ease-out), transform 200ms var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: translateX(14px);
+  }
 }
-#app .details-header { min-height: 65px; padding: 14px 19px; }
-#app .details-heading h2 { font-size: 15px; font-weight: 630; }
-#app .details-eyebrow { font-size: 9px; font-weight: 580; letter-spacing: .09em; }
+#app .details-header { min-height: 62px; padding: 14px 19px; }
+#app .details-heading h2 { font-size: 15px; font-weight: 640; }
+#app .details-eyebrow { font-size: 9px; font-weight: 600; letter-spacing: .1em; }
 #app .details-content { padding: 18px 19px; }
 #app .details-art {
   height: 115px;
   border: 1px solid var(--border-subtle);
-  border-radius: 11px;
-  background: var(--bg-secondary);
-  margin-bottom: 18px;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 50% 0%, color-mix(in srgb, currentColor 10%, transparent), transparent 72%),
+    var(--bg-secondary);
+  margin-bottom: 16px;
 }
-#app .details-art svg { width: 38px; height: 38px; }
-#app .details-filename { font-size: 15px; line-height: 1.4; font-weight: 630; }
-#app .details-metadata { margin-top: 19px; }
+#app .details-art-emblem {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
+  background: var(--bg-primary);
+  border: 1px solid color-mix(in srgb, currentColor 16%, var(--border-subtle));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 55%, transparent),
+    0 6px 18px color-mix(in srgb, black 6%, transparent);
+}
+#app .details-art[data-type='video'] { color: light-dark(#dc4c3e, #ff7b72); }
+#app .details-art[data-type='audio'] { color: light-dark(#8b5cf6, #b794f4); }
+#app .details-art[data-type='archive'] { color: light-dark(#d97706, #f6ad55); }
+#app .details-art[data-type='code'],
+#app .details-art[data-type='text'] { color: light-dark(#2563eb, #60a5fa); }
+#app .details-art[data-type='document'] { color: light-dark(#4f46e5, #818cf8); }
+#app .details-art svg { width: 32px; height: 32px; stroke-width: 1.6; }
+#app .details-filename { font-size: 15px; line-height: 1.45; font-weight: 650; }
+#app .details-filetype {
+  margin-top: 2px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+#app .details-metadata { margin-top: 18px; }
 #app .details-metadata > div { padding: 11px 0; }
-#app .details-actions { padding: 15px 19px 18px; }
+#app .details-path-row dd {
+  user-select: all;
+  border-radius: 10px;
+  line-height: 1.65;
+}
+#app .details-actions {
+  padding: 14px 19px 18px;
+  background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+#app .details-actions .btn {
+  border-radius: 10px;
+}
+#app #details-copy:has(+ #details-download[hidden]) {
+  grid-column: 1 / -1;
+}
+
+/* Preview modal — studio framing, crisp metadata pills, and safe zoom scrolling. */
+#preview-dialog[open] > .dialog-panel {
+  border: 1px solid var(--border);
+  box-shadow: 0 28px 90px color-mix(in srgb, black 28%, transparent);
+  transition: opacity 180ms var(--ease-out), transform 200ms var(--ease-out);
+
+  @starting-style {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+
+#preview-dialog .dialog-header {
+  min-height: 60px;
+  padding: 12px 20px;
+}
+
+#preview-dialog .preview-position {
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-weight: 600;
+}
+
+#preview-dialog .preview-stage {
+  background:
+    radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--bg-primary) 42%, var(--bg-secondary)), var(--bg-secondary));
+}
+
+#preview-dialog #preview-body {
+  display: flex;
+  align-items: safe center;
+  justify-content: safe center;
+  padding: 24px 66px;
+}
+
+#preview-dialog #preview-body img:not(.is-loading) {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  background-color: var(--bg-primary);
+  background-image:
+    linear-gradient(45deg, color-mix(in srgb, var(--text-tertiary) 10%, transparent) 25%, transparent 25%),
+    linear-gradient(-45deg, color-mix(in srgb, var(--text-tertiary) 10%, transparent) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--text-tertiary) 10%, transparent) 75%),
+    linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--text-tertiary) 10%, transparent) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  box-shadow: 0 14px 44px color-mix(in srgb, black 16%, transparent);
+  animation: preview-media-in 220ms var(--ease-out);
+}
+
+#preview-dialog #preview-body video,
+#preview-dialog #preview-body audio {
+  border-radius: 12px;
+  box-shadow: 0 12px 36px color-mix(in srgb, black 14%, transparent);
+}
+
+#preview-dialog #preview-body pre {
+  border-radius: 14px;
+  line-height: 1.72;
+  box-shadow: var(--surface-shadow);
+}
+
+#preview-dialog .preview-nav {
+  opacity: 0.78;
+  transition: opacity 150ms ease, background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+#preview-dialog .preview-nav:hover:not(:disabled),
+#preview-dialog .preview-nav:focus-visible:not(:disabled) {
+  opacity: 1;
+}
+
+#preview-dialog .dialog-footer.bordered {
+  min-height: 50px;
+  padding: 10px 20px;
+  gap: 8px 10px;
+  flex-wrap: wrap;
+}
+
+#preview-dialog .dialog-footer.bordered span,
+#preview-dialog .dialog-footer.bordered .preview-zoom-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+#preview-dialog .dialog-footer.bordered .preview-zoom-pill {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+#preview-dialog .dialog-footer.bordered .preview-zoom-pill:hover {
+  border-color: var(--accent);
+}
+
+@keyframes preview-media-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
 
 /* Motion exists to explain state changes, never to pull attention away. */
 @media (prefers-reduced-motion: reduce) {
   #app .file-card,
   #app .file-card-actions,
   #app .toolbar-controls .icon-btn,
-  #hero .hero-feature {
+  #hero .hero-feature,
+  #app .details-panel,
+  #preview-dialog[open] > .dialog-panel,
+  #preview-dialog #preview-body img:not(.is-loading) {
     transition: none !important;
+    animation: none !important;
   }
 }
 @media (max-width:640px) {
@@ -320,5 +491,8 @@ dialog > .dialog-panel {
   #app .details-panel:not([hidden]) {
     max-width: min(360px, 92vw);
     width: min(360px, 92vw);
+  }
+  #preview-dialog #preview-body {
+    padding: 12px 12px 66px;
   }
 }
