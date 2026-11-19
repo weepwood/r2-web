@@ -164,8 +164,14 @@ test('version metadata stays synchronized across package.json, constants.js, and
 
 test('quiet-ui polish preserves containment, modal backdrop blur, and clean scrollbars', () => {
   const quiet = read('src/css/quiet-ui.css')
+  const details = read('src/js/file-details.js')
+  const preview = read('src/js/file-preview.js')
   assert.match(quiet, /scrollbar-width:\s*thin/)
   assert.match(quiet, /dialog::backdrop/)
   assert.match(quiet, /#app \.file-card\s*\{[\s\S]*?contain:\s*layout style/)
   assert.match(quiet, /#app \.bucket-switcher-select/)
+  assert.match(quiet, /#app \.details-art-emblem/)
+  assert.match(quiet, /#preview-dialog #preview-body\s*\{[\s\S]*?align-items:\s*safe center/)
+  assert.match(details, /details-art-emblem/)
+  assert.match(preview, /preview-zoom-pill/)
 })

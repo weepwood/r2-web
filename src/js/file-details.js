@@ -116,7 +116,12 @@ class FileDetails {
     const item = this.#item
     if (!item) return
     $('#details-filename').textContent = extractFileName(item.key)
-    $('#details-filetype').textContent = item.isFolder ? t('detailsFolder') : t('detailsFile')
+    const extMatch = !item.isFolder ? extractFileName(item.key).match(/\.([a-z0-9]{1,10})$/i) : null
+    $('#details-filetype').textContent = item.isFolder
+      ? t('detailsFolder')
+      : extMatch
+        ? extMatch[1].toUpperCase()
+        : t('detailsFile')
     $('#details-size').textContent = item.isFolder ? '—' : filesize(item.size)
     $('#details-modified').textContent = item.modified ? formatDate(item.modified) : '—'
     $('#details-type').textContent = item.isFolder ? t('detailsFolder') : getMimeType(item.key)
@@ -124,11 +129,12 @@ class FileDetails {
     const art = $('#details-art')
     art.dataset.type = item.isFolder ? 'folder' : item.type
     // Only static, locally authored icons; the file key is never HTML-interpolated.
-    art.innerHTML = item.isFolder
+    const iconSvg = item.isFolder
       ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>'
       : item.type === 'image'
         ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m3 18 6-6 4 4 3-3 5 5"/></svg>'
         : getFileIconSvg(/** @type {'video'|'audio'|'text'|'document'|'archive'|'code'|'file'} */ (item.type))
+    art.innerHTML = `<span class="details-art-emblem">${iconSvg}</span>`
     $('#details-open-text').textContent = item.isFolder ? t('detailsOpenFolder') : t('preview')
     $('#details-download').hidden = item.isFolder
   }
