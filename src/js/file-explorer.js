@@ -256,25 +256,28 @@ class FileExplorer {
   /** Re-render only thumbnails when the local user preference changes. */
   refreshThumbnails() {
     if (this.#loadedItems.length === 0) return
-    this.#resortAndRender()
+    this.#resortAndRender(true)
   }
 
   /** @param {string} sortBy */
   setSortBy(sortBy) {
     this.#sortBy = sortBy
-    this.#resortAndRender()
+    this.#resortAndRender(false)
   }
 
   /** @param {'asc' | 'desc'} order */
   setSortOrder(order) {
     this.#sortOrder = order
-    this.#resortAndRender()
+    this.#resortAndRender(false)
   }
 
-  #resortAndRender() {
+  /** @param {boolean} [rebuildCards] */
+  #resortAndRender(rebuildCards = false) {
     if (this.#loadedItems.length === 0) return
-    this.#resetThumbnails()
-    $('#file-grid').innerHTML = ''
+    if (rebuildCards) {
+      this.#resetThumbnails()
+      $('#file-grid').innerHTML = ''
+    }
     this.#renderItems(this.#sortItems(this.#loadedItems))
     this.#restoreSelectionUI()
     this.#applyFilter()
@@ -332,9 +335,14 @@ class FileExplorer {
       const cached = this.#cache.get(cacheKey)
       let result
       if (!bypassCache && cached && Date.now() - cached.ts < CACHE_TTL) {
+        this.#cache.delete(cacheKey)
+        this.#cache.set(cacheKey, cached)
         result = cached.data
       } else {
         result = await this.#r2.listObjects(this.#prefix, this.#continuationToken)
+        if (this.#cache.size >= 100) {
+          this.#cache.delete(this.#cache.keys().next().value ?? '')
+        }
         this.#cache.set(cacheKey, { data: result, ts: Date.now() })
       }
 
@@ -574,7 +582,7 @@ class FileExplorer {
 
     try {
       const browserDpr = typeof window === 'undefined' ? 1 : window.devicePixelRatio
-      const displayWidth = $('#file-browser').dataset.view === 'list' ? 64 : Math.min(card.clientWidth, 260)
+      const displayWidth = $('#file-browser').dataset.view === 'list' ? 64 : Math.min(card.clientWidth || 180, 260)
       const policy = this.#images.thumbnailPlan(key, displayWidth, browserDpr)
 
       if (!policy.url && !policy.allowOriginal) {

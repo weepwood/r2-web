@@ -6,6 +6,8 @@ import { ImageAssetService } from './image-asset-service.js'
 import { UIManager } from './ui-manager.js'
 import { $, formatDate, getErrorMessage, extractFileName, getMimeType } from './utils.js'
 
+const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024
+
 /** @typedef {{key: string, size?: number, lastModified?: number}} PreviewItem */
 
 class FilePreview {
@@ -36,8 +38,50 @@ class FilePreview {
       this.#currentKey = ''
       this.#currentText = ''
       this.#currentUrl = ''
-      dialog.querySelectorAll('video, audio').forEach((el) => /** @type {HTMLMediaElement} */ (el).pause())
+      this.#releaseMedia(dialog)
     })
+  }
+
+  /** @param {ParentNode} root */
+  #releaseMedia(root) {
+    root.querySelectorAll('video, audio').forEach((el) => {
+      const media = /** @type {HTMLMediaElement} */ (el)
+      media.pause()
+      media.removeAttribute('src')
+      media.load()
+    })
+  }
+
+  /** @param {Response} res @returns {Promise<{ text: string; truncated: boolean }>} */
+  async #readLimitedText(res) {
+    const reader = res.body?.getReader()
+    if (!reader) {
+      const text = await res.text()
+      return { text, truncated: false }
+    }
+    const decoder = new TextDecoder()
+    let text = ''
+    let total = 0
+    let truncated = false
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const remaining = MAX_TEXT_PREVIEW_BYTES - total
+        if (value.byteLength > remaining) {
+          text += decoder.decode(value.subarray(0, remaining), { stream: false })
+          truncated = true
+          await reader.cancel().catch(() => {})
+          break
+        }
+        total += value.byteLength
+        text += decoder.decode(value, { stream: true })
+      }
+      if (!truncated) text += decoder.decode()
+    } finally {
+      reader.releaseLock()
+    }
+    return { text, truncated }
   }
 
   get currentKey() {
@@ -124,6 +168,7 @@ class FilePreview {
 
     const dialog = /** @type {HTMLDialogElement} */ ($('#preview-dialog'))
     const body = $('#preview-body')
+    this.#releaseMedia(body)
     const footer = $('#preview-footer')
     const copyBtn = /** @type {HTMLElement} */ ($('#preview-copy'))
     const copyTextBtn = /** @type {HTMLElement} */ ($('#preview-copy-text'))
@@ -208,12 +253,19 @@ class FilePreview {
         } else {
           const res = await this.#r2.getObject(key)
           if (!isCurrent()) return
-          const text = await res.text()
+          const { text, truncated } = await this.#readLimitedText(res)
           if (!isCurrent()) return
           this.#currentText = text
           const pre = document.createElement('pre')
           pre.textContent = text
-          body.replaceChildren(pre)
+          if (truncated) {
+            const notice = document.createElement('p')
+            notice.className = 'preview-message preview-message-empty'
+            notice.textContent = t('previewTextTruncated')
+            body.replaceChildren(notice, pre)
+          } else {
+            body.replaceChildren(pre)
+          }
           copyTextBtn.hidden = false
         }
         copyBtn.hidden = false
@@ -258,35 +310,39 @@ class FilePreview {
 
   async copyCurrentImage() {
     if (!this.#currentUrl) return
-    if (!navigator.clipboard?.write) {
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
       this.#ui.toast(t('copyImageNotSupported'), 'error')
       return
     }
+    let objectUrl = ''
     try {
       const res = await fetch(this.#currentUrl)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const blob = await res.blob()
-      const objectUrl = URL.createObjectURL(blob)
+      objectUrl = URL.createObjectURL(blob)
       const pngBlob = await new Promise((resolve, reject) => {
         const img = new Image()
         img.onload = () => {
           const canvas = document.createElement('canvas')
           canvas.width = img.naturalWidth
           canvas.height = img.naturalHeight
-          canvas.getContext('2d').drawImage(img, 0, 0)
+          const ctx = canvas.getContext('2d')
+          if (!ctx) {
+            reject(new Error('Canvas context unavailable'))
+            return
+          }
+          ctx.drawImage(img, 0, 0)
           canvas.toBlob((b) => (b ? resolve(b) : reject(new Error())), 'image/png')
-          URL.revokeObjectURL(objectUrl)
         }
-        img.onerror = () => {
-          URL.revokeObjectURL(objectUrl)
-          reject(new Error('Image decode failed'))
-        }
+        img.onerror = () => reject(new Error('Image decode failed'))
         img.src = objectUrl
       })
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })])
       this.#ui.toast(t('copyImageSuccess'), 'success')
     } catch {
       this.#ui.toast(t('copyImageFailed'), 'error')
+    } finally {
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }
 

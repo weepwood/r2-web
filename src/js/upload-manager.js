@@ -55,18 +55,22 @@ async function compressFile(file, config, onStatus) {
         const img = new Image()
         const canvas = document.createElement('canvas')
         const ctx = canvas.getContext('2d')
+        if (!ctx) return file
+        const objectUrl = URL.createObjectURL(file)
+        try {
+          await new Promise((resolve, reject) => {
+            img.onload = resolve
+            img.onerror = reject
+            img.src = objectUrl
+          })
 
-        await new Promise((resolve, reject) => {
-          img.onload = resolve
-          img.onerror = reject
-          img.src = URL.createObjectURL(file)
-        })
-
-        canvas.width = img.width
-        canvas.height = img.height
-        ctx.drawImage(img, 0, 0)
+          canvas.width = img.width
+          canvas.height = img.height
+          ctx.drawImage(img, 0, 0)
+        } finally {
+          URL.revokeObjectURL(objectUrl)
+        }
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        URL.revokeObjectURL(img.src)
 
         if (ext === 'jpg' || ext === 'jpeg') {
           compressedBuffer = await encodeJpeg(imageData, { quality: jpegQuality })
@@ -561,17 +565,26 @@ class UploadManager {
       const signed = await this.#r2.putObjectSigned(key, contentType)
       if (bar) bar.classList.add('indeterminate')
 
-      const headers = new Headers()
-      for (const [k, v] of Object.entries(signed.headers)) {
-        if (k.toLowerCase() !== 'host') headers.set(k, v)
-      }
-
-      const res = await fetch(signed.url, {
-        method: 'PUT',
-        headers,
-        body: file,
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('PUT', signed.url)
+        for (const [k, v] of Object.entries(signed.headers)) {
+          if (k.toLowerCase() !== 'host') xhr.setRequestHeader(k, v)
+        }
+        xhr.upload.onprogress = (event) => {
+          if (!bar || !event.lengthComputable || event.total <= 0) return
+          bar.classList.remove('indeterminate')
+          const percent = Math.min(100, Math.max(0, Math.round((event.loaded / event.total) * 100)))
+          bar.style.width = `${percent}%`
+        }
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) resolve(undefined)
+          else reject(new Error(`HTTP ${xhr.status}`))
+        }
+        xhr.onerror = () => reject(new TypeError('Failed to fetch'))
+        xhr.onabort = () => reject(new Error('Upload aborted'))
+        xhr.send(file)
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
     } catch (error) {
       // Signing failures and network failures must both leave a visible error state.
       if (bar) bar.classList.add('error')

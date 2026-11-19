@@ -60,6 +60,15 @@ class R2Client {
     throw new Error(`HTTP ${res.status}`)
   }
 
+  /** @param {string} text */
+  #parseXml(text) {
+    const doc = new DOMParser().parseFromString(text, 'application/xml')
+    if (doc.querySelector('parsererror')) throw new Error('R2_INVALID_XML')
+    const code = doc.querySelector('Error > Code')?.textContent
+    if (code) throw new Error('R2_API_' + code)
+    return doc
+  }
+
   /** @param {string} [prefix] @param {string} [continuationToken] @param {number} [maxKeys] */
   async listObjects(prefix = '', continuationToken = '', maxKeys = PAGE_SIZE) {
     const url = new URL(/** @type {ConfigManager} */ (this.#config).getBucketUrl())
@@ -72,8 +81,7 @@ class R2Client {
     const res = await this.#signedFetch(url.toString())
     this.#assertOk(res)
 
-    const text = await res.text()
-    const doc = new DOMParser().parseFromString(text, 'application/xml')
+    const doc = this.#parseXml(await res.text())
 
     /** @type {FileItem[]} */
     const folders = [...doc.querySelectorAll('CommonPrefixes > Prefix')].map((el) => ({
@@ -114,8 +122,7 @@ class R2Client {
     url.searchParams.set('prefix', key)
     const res = await this.#signedFetch(url.toString())
     this.#assertOk(res)
-    const text = await res.text()
-    const doc = new DOMParser().parseFromString(text, 'application/xml')
+    const doc = this.#parseXml(await res.text())
     return [...doc.querySelectorAll('Contents > Key')].some((el) => el.textContent === key)
   }
 
@@ -169,7 +176,12 @@ class R2Client {
   async getDownloadUrl(key, filename) {
     const base = `${/** @type {ConfigManager} */ (this.#config).getBucketUrl()}/${encodeS3Key(key)}`
     const url = new URL(base)
-    url.searchParams.set('response-content-disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
+    const asciiFallback = filename.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_') || 'download'
+    const utf8Name = encodeURIComponent(filename).replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())
+    url.searchParams.set(
+      'response-content-disposition',
+      `attachment; filename="${asciiFallback}"; filename*=UTF-8''${utf8Name}`,
+    )
     const signed = await /** @type {AwsClient} */ (this.#client).sign(url.toString(), {
       method: 'GET',
       aws: { signQuery: true },

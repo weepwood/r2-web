@@ -7,7 +7,9 @@ const $ = (sel, ctx = document) => /** @type {*} */ (ctx.querySelector(sel))
 
 /** @param {string|number|Date} dateStr @returns {string} */
 function formatDate(dateStr) {
+  if (!dateStr) return '—'
   const d = new Date(dateStr)
+  if (Number.isNaN(d.getTime())) return '—'
   const currentLang = getCurrentLang()
   return d.toLocaleDateString(currentLang === 'zh' ? 'zh-CN' : currentLang === 'ja' ? 'ja-JP' : 'en-US', {
     year: 'numeric',
@@ -196,18 +198,51 @@ async function applyFilenameTemplate(template, file) {
   const originalName = file.name
   const ext = getExtension(originalName)
   const base = getBaseName(originalName)
-  const fileHash = await computeFileHash(file)
 
   let result = template
   result = result.replace(/\[name\]/g, base)
   result = result.replace(/\[ext\]/g, ext)
   result = result.replace(/\[timestamp\]/g, String(Math.floor(Date.now() / 1000)))
   result = result.replace(/\[uuid\]/g, crypto.randomUUID())
-  result = result.replace(/\[hash:(\d+)\]/g, (_, n) => fileHash.slice(0, parseInt(/** @type {string} */ (n), 10)))
-  result = result.replace(/\[hash\]/g, fileHash.slice(0, 6))
+  if (/\[hash(?::\d+)?\]/.test(result)) {
+    const fileHash = await computeFileHash(file)
+    result = result.replace(/\[hash:(\d+)\]/g, (_, n) => fileHash.slice(0, parseInt(/** @type {string} */ (n), 10)))
+    result = result.replace(/\[hash\]/g, fileHash.slice(0, 6))
+  }
   result = result.replace(/\[date:([^\]]+)\]/g, (_, format) => dayjs().format(/** @type {string} */ (format)))
 
   return result
+}
+
+/**
+ * 将任意浏览器可解码的图片 Blob 转为 PNG Blob，便于写入系统剪贴板。
+ * @param {Blob} blob
+ * @returns {Promise<Blob>}
+ */
+async function blobToPng(blob) {
+  if (blob.type === 'image/png') return blob
+  const objectUrl = URL.createObjectURL(blob)
+  try {
+    return await new Promise((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = img.naturalWidth
+        canvas.height = img.naturalHeight
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          reject(new Error('Canvas context unavailable'))
+          return
+        }
+        ctx.drawImage(img, 0, 0)
+        canvas.toBlob((png) => (png ? resolve(png) : reject(new Error('PNG encode failed'))), 'image/png')
+      }
+      img.onerror = () => reject(new Error('Image decode failed'))
+      img.src = objectUrl
+    })
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
 }
 
 export {
@@ -223,4 +258,5 @@ export {
   encodeS3Key,
   computeFileHash,
   applyFilenameTemplate,
+  blobToPng,
 }
